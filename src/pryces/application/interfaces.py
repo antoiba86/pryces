@@ -69,7 +69,22 @@ class PortfolioRepository(ABC):
         pass
 
     @abstractmethod
-    def create(self, name: str, base_currency: str, user_id: int = 1) -> PortfolioSummary:
+    def create(
+        self,
+        base_currency: str,
+        name: str | None = None,
+        user_id: int = 1,
+    ) -> PortfolioSummary:
+        # `name` is optional; when omitted the repository assigns a default like
+        # `portfolio_<YYYY-MM-DD_HH-MM-SS>` (and auto-bumps `_2`, `_3`, ... on
+        # collision). Raises PortfolioAlreadyExists if the resolved name is
+        # already taken or a same-named file already exists on disk.
+        pass
+
+    @abstractmethod
+    def rename(self, old_name: str, new_name: str, user_id: int = 1) -> None:
+        # Updates the name → filename index entry only; the portfolio file
+        # itself is untouched, so external references survive renames.
         pass
 
     @abstractmethod
