@@ -51,6 +51,7 @@ class InstrumentType(str, Enum):
     ETF = "ETF"
     CRYPTO = "CRYPTO"
     INDEX = "INDEX"
+    FX = "FX"
 
 
 class Currency(str, Enum):
