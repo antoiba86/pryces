@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 
+from pryces.domain.portfolio.portfolio import ManualAsset, PortfolioSummary
+from pryces.domain.portfolio.transactions import Transaction
 from pryces.domain.stock_statistics import StockStatistics
 from pryces.domain.stocks import Stock
 
@@ -54,4 +56,50 @@ class Logger(ABC):
 class LoggerFactory(ABC):
     @abstractmethod
     def get_logger(self, name: str) -> Logger:
+        pass
+
+
+class PortfolioRepository(ABC):
+    @abstractmethod
+    def list_portfolios(self, user_id: int = 1) -> list[PortfolioSummary]:
+        pass
+
+    @abstractmethod
+    def find_summary_by_name(self, name: str, user_id: int = 1) -> PortfolioSummary | None:
+        pass
+
+    @abstractmethod
+    def create(self, name: str, base_currency: str, user_id: int = 1) -> PortfolioSummary:
+        pass
+
+    @abstractmethod
+    def delete(self, name: str, user_id: int = 1) -> None:
+        pass
+
+    @abstractmethod
+    def add_transactions(
+        self,
+        portfolio_name: str,
+        transactions: list[Transaction],
+        user_id: int = 1,
+    ) -> int:
+        # Returns the count of NEWLY-appended rows. Duplicates (matched on
+        # broker + raw_id within the portfolio) are silently skipped.
+        pass
+
+    @abstractmethod
+    def get_transactions(self, portfolio_name: str, user_id: int = 1) -> list[Transaction]:
+        pass
+
+    @abstractmethod
+    def set_manual_assets(
+        self,
+        portfolio_name: str,
+        manual_assets: list[ManualAsset],
+        user_id: int = 1,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    def get_manual_assets(self, portfolio_name: str, user_id: int = 1) -> list[ManualAsset]:
         pass
