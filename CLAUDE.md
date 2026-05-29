@@ -146,6 +146,10 @@ Presentation → Application → Domain
 - `use_cases/get_stocks_prices.py` — `GetStocksPrices` (batch symbols → list[StockDTO])
 - `use_cases/trigger_stocks_statistics.py` — `TriggerStocksStatisticsRequest` (symbols: `list[str]`), `TriggerStocksStatistics` (injects `StockStatisticsProvider`, `StockStatisticsFormatter`, and `MessageSender`; `handle(request) -> None` — fetches stats, formats each via `StockStatistics.format(formatter)`, sends each via `MessageSender.send_message()`; owns the full fetch → format → send pipeline)
 - `use_cases/send_messages.py` — `SendMessages` (sends list of messages → success/failed counts)
+- `use_cases/list_portfolios.py` — `ListPortfolios` (returns `list[PortfolioSummary]` from `PortfolioRepository.list_portfolios`)
+- `use_cases/create_portfolio.py` — `CreatePortfolioRequest` (`base_currency`, optional `name`, `user_id=1`), `CreatePortfolio` (delegates to `PortfolioRepository.create`; propagates `PortfolioAlreadyExists`)
+- `use_cases/delete_portfolio.py` — `DeletePortfolioRequest` (`name`, `user_id=1`), `DeletePortfolio` (delegates to `PortfolioRepository.delete`; propagates `PortfolioNotFound`)
+- `use_cases/rename_portfolio.py` — `RenamePortfolioRequest` (`old_name`, `new_name`, `user_id=1`), `RenamePortfolio` (delegates to `PortfolioRepository.rename`; propagates `PortfolioNotFound` / `PortfolioAlreadyExists`)
 - `use_cases/trigger_stocks_notifications.py` — `TriggerStocksNotifications` + `TriggerStocksNotificationsRequest` (symbols + targets: `dict[str, list[Decimal]]`; delegates stock fetching/merging/target-sync to `StockSynchronizer.fetch_and_sync()`, triggers notifications via `NotificationService.send_stock_notifications(stock)` and collects fulfilled targets from its return value, persists via `StockSynchronizer.persist()`; `handle()` returns `list[TargetPriceDTO]` of fulfilled targets)
 
 **Infrastructure** (`src/pryces/infrastructure/`) — Adapter implementations:
