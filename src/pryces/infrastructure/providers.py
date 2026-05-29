@@ -41,8 +41,9 @@ class YahooFinanceMapper:
         self._logger = logger_factory.get_logger(__name__)
 
     def map(self, symbol: str, info: dict) -> Stock | None:
-        # yfinance returns a small metadata-only dict (≤3 keys) for invalid/delisted symbols
-        if not info or len(info) <= 3:
+        # yfinance returns a small metadata-only dict (≤3 keys) for invalid/delisted symbols.
+        # FX pairs legitimately return small dicts, so let CURRENCY quoteType through.
+        if not info or (len(info) <= 3 and info.get("quoteType") != "CURRENCY"):
             self._logger.error(f"No data available for symbol: {symbol}")
             return None
 
@@ -108,6 +109,7 @@ class YahooFinanceMapper:
             "ETF": InstrumentType.ETF,
             "CRYPTOCURRENCY": InstrumentType.CRYPTO,
             "INDEX": InstrumentType.INDEX,
+            "CURRENCY": InstrumentType.FX,
         }
         if value is None:
             return None

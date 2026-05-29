@@ -3,7 +3,9 @@ from abc import ABC, abstractmethod
 from pryces.domain.portfolio.portfolio import ManualAsset, PortfolioSummary
 from pryces.domain.portfolio.transactions import Transaction
 from pryces.domain.stock_statistics import StockStatistics
-from pryces.domain.stocks import Stock
+from decimal import Decimal
+
+from pryces.domain.stocks import Currency, Stock
 
 
 class StockProvider(ABC):
@@ -15,6 +17,15 @@ class StockProvider(ABC):
 class StockStatisticsProvider(ABC):
     @abstractmethod
     def get_stock_statistics(self, symbols: list[str]) -> list[StockStatistics]:
+        pass
+
+
+class FxRateProvider(ABC):
+    @abstractmethod
+    def get_rates(self, base: Currency, quotes: list[Currency]) -> dict[Currency, Decimal]:
+        # Returns rate-per-quote-unit in the base currency (so 1 USD = rate[USD] EUR
+        # when base is EUR). Quotes equal to base map to Decimal("1"). Quotes for
+        # which no rate is available are omitted.
         pass
 
 

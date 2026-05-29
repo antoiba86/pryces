@@ -64,6 +64,19 @@ class TestYahooFinanceMapper:
 
         assert mapper.map("AAPL", info) is None
 
+    def test_allows_small_info_through_for_currency_quote_type(self, mapper):
+        info = {
+            "regularMarketPrice": 1.0825,
+            "quoteType": "CURRENCY",
+            "symbol": "EURUSD=X",
+        }
+
+        stock = mapper.map("EURUSD=X", info)
+
+        assert stock is not None
+        assert stock.current_price == Decimal("1.0825")
+        assert stock.kind == InstrumentType.FX
+
     def test_returns_none_when_no_price_available(self, mapper):
         info = _build_full_info()
         del info["currentPrice"]
@@ -191,6 +204,7 @@ class TestYahooFinanceMapper:
             ("ETF", InstrumentType.ETF),
             ("CRYPTOCURRENCY", InstrumentType.CRYPTO),
             ("INDEX", InstrumentType.INDEX),
+            ("CURRENCY", InstrumentType.FX),
             ("MUTUALFUND", None),
             ("FUTURE", None),
             (None, None),
