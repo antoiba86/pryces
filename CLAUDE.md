@@ -204,6 +204,13 @@ Presentation → Application → Domain
 - `report_stocks_statistics.py` — Standalone one-shot script (`ReportStocksStatisticsScript` class, argparse CLI). Entry point: `main()`. Args: `--debug`, `--verbose`. Injects a `list_tracked_symbols: Callable[[], list[str]]` callable; in `run()` it calls the callable and delegates the full fetch → format → send pipeline to `TriggerStocksStatistics`. Exits immediately — designed for scheduled (cron) use. Composition root (`_create_script`) wires `YahooFinanceStatisticsProvider`, `TelegramMessageSender`, `TriggerStocksStatistics` (with `RegularStockStatisticsFormatter`), and `ConfigStore(CONFIGS_DIR).list_tracked_symbols`.
 - `report_portfolio.py` — Standalone one-shot script (`ReportPortfolioScript` class, argparse CLI). Entry point: `main()`. Args: `--portfolio NAME` (required), `--debug`, `--verbose`. In `run()` it fetches the named portfolio via `GetPortfolio` (with live prices, FX, and historical-FX XIRR), formats it with `TelegramPortfolioFormatter`, and sends each message via `TelegramMessageSender`; logs and returns quietly on `PortfolioNotFound`. Exits immediately — designed for scheduled (cron) use. Composition root (`_create_script`) wires `YahooFinanceProvider`, `YahooFinanceFxProvider`, `YahooFinanceHistoricalFxProvider`, `JsonPortfolioRepository`, `GetPortfolio`, and `TelegramMessageSender`.
 
+**Presentation — HTTP API** (`src/pryces/presentation/api/`) — FastAPI adapter, a fourth peer to the CLI/bot/scripts (all call the same use cases; the API does not wrap the CLI). Adds `fastapi`, `uvicorn[standard]`, `python-multipart` runtime deps (the deliberate minimal-deps exception) and `httpx` as a dev dep for `TestClient`:
+- `main.py` — `create_app()` builds the `FastAPI` app, enables CORS for `http://localhost(:port)?` origins (so the localhost web dashboard can call it), includes the routers, and exposes module-level `app` for `uvicorn pryces.presentation.api.main:app`. Calls `load_dotenv()`.
+- `dependencies.py` — FastAPI `Depends` providers building the stack (`get_logger_factory`, `get_portfolio_repository`, `get_stock_provider`, `get_fx_provider`, `get_historical_fx_provider`, `get_symbol_resolver`, `get_importer_registry`) and the use cases on top (`get_list_portfolios`, `get_create_portfolio`, `get_delete_portfolio`, `get_get_portfolio`, `get_import_transactions`); `current_user_id()` returns the constant `1` (auth seam). Provider/repo deps are separate functions so tests override them via `app.dependency_overrides`.
+- `schemas.py` — Pydantic models with explicit `from_*` classmethods; all `Decimal` fields serialize as strings (`PortfolioSummaryResponse`, `PositionResponse`, `ManualAssetResponse`, `PortfolioResponse` (positions from `unified_positions`, totals, xirr/twr), `CreatePortfolioBody`, `ImportResultResponse`).
+- `routes/health.py` — `GET /health` → `{"status": "ok"}`.
+- `routes/portfolios.py` — `GET /portfolios`, `POST /portfolios` (201, 409 on `PortfolioAlreadyExists`), `GET /portfolios/{name}` (404 on `PortfolioNotFound`), `DELETE /portfolios/{name}` (204 / 404), `POST /portfolios/{name}/transactions` (multipart file + optional `?broker=`; 200 `ImportResultResponse`, 404 if portfolio missing, 422 on `UnrecognizedImportFormat`). Every route threads `user_id` from the `current_user_id` dependency. Rename is out of API v1.
+
 ### Key Patterns
 - **Ports & Adapters**: Application defines ABCs, infrastructure implements them
 - **Command Pattern**: Each CLI action is a `Command` with metadata, input prompts, and execute
@@ -217,6 +224,7 @@ python -m pryces.presentation.scripts.monitor_stocks CONFIG_PATH --duration N  #
 python -m pryces.presentation.scripts.telegram_bot                # Telegram bot for target management
 python -m pryces.presentation.scripts.report_stocks_statistics    # One-shot statistics report
 python -m pryces.presentation.scripts.report_portfolio --portfolio NAME  # One-shot portfolio report
+uvicorn pryces.presentation.api.main:app --port 8000             # HTTP API (FastAPI)
 ```
 
 ## Patterns and Conventions

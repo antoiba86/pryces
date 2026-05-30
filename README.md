@@ -245,6 +245,35 @@ python -m pryces.presentation.scripts.report_portfolio --portfolio main --verbos
 
 If the named portfolio doesn't exist, the script logs an error and exits without sending anything.
 
+### HTTP API
+
+A FastAPI app exposes the portfolio use cases over HTTP — a fourth presentation adapter alongside the CLI, the Telegram bot, and the cron scripts (all share the same application use cases). It powers the web dashboard and any scripted access.
+
+```bash
+source venv/bin/activate
+uvicorn pryces.presentation.api.main:app --port 8000
+# interactive OpenAPI docs at http://127.0.0.1:8000/docs
+```
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Liveness check |
+| GET | `/portfolios` | List portfolios |
+| POST | `/portfolios` | Create a portfolio (`{"base_currency": "EUR", "name": "main"}`) |
+| GET | `/portfolios/{name}` | Portfolio with live prices, totals, and XIRR |
+| DELETE | `/portfolios/{name}` | Delete a portfolio |
+| POST | `/portfolios/{name}/transactions` | Import a broker export (`multipart/form-data` file, optional `?broker=`) |
+
+```bash
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/portfolios \
+     -H 'Content-Type: application/json' -d '{"base_currency":"EUR","name":"main"}'
+curl -F file=@docs/Transactions.csv 'http://127.0.0.1:8000/portfolios/main/transactions?broker=degiro'
+curl http://127.0.0.1:8000/portfolios/main
+```
+
+All monetary values serialize as strings to preserve decimal precision. CORS is enabled for `http://localhost` origins only, and the server binds to loopback — there is no authentication in v1 (it's designed for local/single-user use, with a `current_user_id` seam for adding auth later).
+
 ### Interactive CLI
 
 Launch the interactive menu:
