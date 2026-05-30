@@ -9,7 +9,7 @@ from ...infrastructure.configs import CONFIGS_DIR, ConfigStore
 from ...infrastructure.factories import SettingsFactory
 from ...infrastructure.fx import YahooFinanceFxProvider, YahooFinanceHistoricalFxProvider
 from ...infrastructure.importers.degiro import DegiroCsvImporter
-from ...infrastructure.importers.ibkr import IbkrFlexImporter
+from ...infrastructure.importers.ibkr import IbkrActivityImporter
 from ...infrastructure.importers.json_ledger import JsonLedgerImporter
 from ...infrastructure.logging import PythonLoggerFactory, setup_logging
 from ...infrastructure.portfolio_formatters import TelegramPortfolioFormatter
@@ -40,7 +40,7 @@ def _create_menu(logger_factory: LoggerFactory) -> InteractiveMenu:
         YahooSymbolResolver(logger_factory), JsonSymbolMap(), logger_factory
     )
     importer_registry = ImporterRegistry(
-        [DegiroCsvImporter(), JsonLedgerImporter(), IbkrFlexImporter()], logger_factory
+        [DegiroCsvImporter(), JsonLedgerImporter(), IbkrActivityImporter()], logger_factory
     )
 
     factory = CommandFactory(

@@ -20,7 +20,7 @@ from ...application.use_cases.list_portfolios import ListPortfolios
 from ...infrastructure.factories import SettingsFactory
 from ...infrastructure.fx import YahooFinanceFxProvider, YahooFinanceHistoricalFxProvider
 from ...infrastructure.importers.degiro import DegiroCsvImporter
-from ...infrastructure.importers.ibkr import IbkrFlexImporter
+from ...infrastructure.importers.ibkr import IbkrActivityImporter
 from ...infrastructure.importers.json_ledger import JsonLedgerImporter
 from ...infrastructure.logging import PythonLoggerFactory
 from ...infrastructure.providers import YahooFinanceHistoricalPriceProvider, YahooFinanceProvider
@@ -78,7 +78,7 @@ def get_importer_registry(
     logger_factory: LoggerFactory = Depends(get_logger_factory),
 ) -> ImporterRegistry:
     return ImporterRegistry(
-        [DegiroCsvImporter(), JsonLedgerImporter(), IbkrFlexImporter()], logger_factory
+        [DegiroCsvImporter(), JsonLedgerImporter(), IbkrActivityImporter()], logger_factory
     )
 
 
