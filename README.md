@@ -257,7 +257,12 @@ Available commands:
 | 6 | List Monitor Processes | List running monitor processes |
 | 7 | Stop Monitor Process | Stop a running monitor process |
 | 8 | Get Stock Prices | Current price and details for one or multiple symbols |
-| 9 | Check Readiness | Verify env vars and Telegram connectivity |
+| 9 | List Portfolios | List all portfolios with base currency and transaction count |
+| 10 | Create Portfolio | Create a new portfolio (name optional, base currency) |
+| 11 | Show Portfolio | Show a portfolio with live prices (optionally send to Telegram) |
+| 12 | Import Transactions | Import a broker export (DEGIRO CSV / JSON ledger) into a portfolio |
+| 13 | Delete Portfolio | Delete an existing portfolio |
+| 14 | Check Readiness | Verify env vars and Telegram connectivity |
 | 0 | Exit | Exit the program |
 
 Configs are stored in the `configs/` directory at the project root. Use the CLI to create and manage them — there is no need to edit JSON files manually.
@@ -439,6 +444,45 @@ Example output when issues are detected:
 [NOT READY] Telegram notifications
 
 Fix the errors above and restart the app for changes to take effect.
+```
+
+#### Portfolios
+
+Pryces tracks one or more named portfolios alongside stock monitoring. Portfolio
+data is stored as JSON outside the repository — by default under `~/.pryces/`
+(override with the `PRYCES_DATA_DIR` environment variable) — so it is never
+accidentally committed and can be shared across checkouts.
+
+Typical flow:
+
+1. **Create Portfolio** — pick a base currency (default `EUR`); a name is optional
+   (auto-generated if blank).
+2. **Import Transactions** — point at a broker export and confirm. The importer is
+   auto-detected (leave the broker blank), or you can name it explicitly:
+   - **DEGIRO** — the `Transactions.csv` export (trades only).
+   - **JSON ledger** — a `{ "base_currency", "transactions" }` file, e.g. when
+     migrating from another tool.
+
+   Re-importing the same file is safe: rows are deduplicated by broker + order id,
+   so the second run reports `inserted: 0`.
+3. **Show Portfolio** — fetches live prices and FX rates (via the same Yahoo Finance
+   provider used for stock monitoring), prints holdings and totals, and can
+   optionally send the same report to Telegram.
+
+**Symbol resolution.** Broker exports identify instruments by ISIN, not by Yahoo
+ticker. On import, Pryces resolves each ISIN to a Yahoo symbol (ISIN/name search,
+disambiguated by the listing exchange) and caches the mapping in a user-editable
+file at `~/.pryces/symbol_map.json`. If a guess is wrong (or an instrument can't be
+resolved — it's reported under "unresolved symbols"), edit that file: add or correct
+the `"<ISIN>": "<TICKER>"` entry and the next import/show picks it up.
+
+Example import output:
+
+```
+Imported into main via degiro:
+  parsed: 21
+  inserted: 21
+  duplicates skipped: 0
 ```
 
 ## Contributing
