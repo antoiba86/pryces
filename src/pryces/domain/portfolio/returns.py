@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
+
+from .transactions import Transaction, TransactionType
+from ..stocks import Currency
+
+# Converts a native-currency amount on a given date into the portfolio base
+# currency (the caller supplies date-accurate FX rates).
+ConvertFn = Callable[[date, Currency, Decimal], Decimal]
 
 _DAYS_PER_YEAR = Decimal("365")
 _XIRR_MAX_ITERATIONS = 100
@@ -22,6 +30,39 @@ def total_return(
     if cost <= 0:
         return Decimal("0")
     return (value + dividends - cost - fees) / cost * 100
+
+
+def build_xirr_cashflows(
+    transactions: list[Transaction],
+    convert: ConvertFn,
+    terminal_value: Decimal,
+    terminal_date: date,
+) -> list[tuple[date, Decimal]]:
+    """Build a base-currency cashflow stream for XIRR from a transaction log.
+
+    Buys and standalone fees are outflows (negative); sells and dividends are
+    inflows (positive). Each native amount is converted to the base currency at
+    its own transaction date via `convert`. The current portfolio value is
+    appended as a terminal inflow on `terminal_date`.
+    """
+    cashflows = [
+        (transaction.date, convert(transaction.date, transaction.currency, amount))
+        for transaction in sorted(transactions, key=lambda t: t.date)
+        for amount in (_signed_native_amount(transaction),)
+    ]
+    if terminal_value != 0:
+        cashflows.append((terminal_date, terminal_value))
+    return cashflows
+
+
+def _signed_native_amount(transaction: Transaction) -> Decimal:
+    if transaction.type == TransactionType.BUY:
+        return -(transaction.quantity * transaction.price + transaction.fee)
+    if transaction.type == TransactionType.SELL:
+        return transaction.quantity * transaction.price - transaction.fee
+    if transaction.type == TransactionType.DIVIDEND:
+        return transaction.amount
+    return -transaction.amount
 
 
 def xirr(

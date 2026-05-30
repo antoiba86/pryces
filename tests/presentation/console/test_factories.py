@@ -3,6 +3,7 @@ from unittest.mock import Mock
 from pryces.application.importers import ImporterRegistry
 from pryces.application.interfaces import (
     FxRateProvider,
+    HistoricalFxRateProvider,
     MessageSender,
     PortfolioRepository,
     StockProvider,
@@ -26,6 +27,7 @@ def _factory(provider=None):
         config_store=Mock(spec=ConfigStore),
         portfolio_repository=Mock(spec=PortfolioRepository),
         fx_provider=Mock(spec=FxRateProvider),
+        historical_fx_provider=Mock(spec=HistoricalFxRateProvider),
         importer_registry=ImporterRegistry([], Mock()),
         symbol_resolver=Mock(spec=SymbolResolver),
         portfolio_formatter=Mock(spec=PortfolioFormatter),

@@ -466,8 +466,11 @@ Typical flow:
    Re-importing the same file is safe: rows are deduplicated by broker + order id,
    so the second run reports `inserted: 0`.
 3. **Show Portfolio** — fetches live prices and FX rates (via the same Yahoo Finance
-   provider used for stock monitoring), prints holdings and totals, and can
-   optionally send the same report to Telegram.
+   provider used for stock monitoring), prints holdings, totals, total return, and a
+   money-weighted **XIRR** (annualized, fee-aware; past cashflows are converted at
+   each transaction's own historical FX rate), and can optionally send the same report
+   to Telegram. (Time-weighted return / TWR is not shown yet — it needs historical
+   valuations and is planned for a later step.)
 
 **Symbol resolution.** Broker exports identify instruments by ISIN, not by Yahoo
 ticker. On import, Pryces resolves each ISIN to a Yahoo symbol (ISIN/name search,

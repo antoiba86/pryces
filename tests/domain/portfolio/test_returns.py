@@ -5,10 +5,13 @@ import pytest
 
 from pryces.domain.portfolio.returns import (
     XirrConvergenceError,
+    build_xirr_cashflows,
     total_return,
     twr,
     xirr,
 )
+from pryces.domain.portfolio.transactions import Transaction, TransactionType
+from pryces.domain.stocks import Currency
 
 
 class TestTotalReturn:
@@ -173,3 +176,95 @@ class TestTwr:
     def test_rejects_non_positive_start(self):
         with pytest.raises(ValueError):
             twr([(Decimal("0"), Decimal("10"))])
+
+
+class TestBuildXirrCashflows:
+
+    def _buy(self, when, currency=Currency.USD, qty="10", price="100", fee="5"):
+        return Transaction(
+            date=when,
+            type=TransactionType.BUY,
+            symbol="AAPL",
+            currency=currency,
+            quantity=Decimal(qty),
+            price=Decimal(price),
+            fee=Decimal(fee),
+        )
+
+    def _identity(self, on, currency, amount):
+        return amount
+
+    def test_buy_is_negative_including_fee(self):
+        flows = build_xirr_cashflows(
+            [self._buy(date(2024, 1, 1))], self._identity, Decimal("0"), date(2024, 6, 1)
+        )
+
+        assert flows == [(date(2024, 1, 1), Decimal("-1005"))]
+
+    def test_sell_is_positive_net_of_fee(self):
+        sell = Transaction(
+            date=date(2024, 2, 1),
+            type=TransactionType.SELL,
+            symbol="AAPL",
+            currency=Currency.USD,
+            quantity=Decimal("10"),
+            price=Decimal("120"),
+            fee=Decimal("5"),
+        )
+
+        flows = build_xirr_cashflows([sell], self._identity, Decimal("0"), date(2024, 6, 1))
+
+        assert flows == [(date(2024, 2, 1), Decimal("1195"))]
+
+    def test_dividend_and_fee_signs(self):
+        dividend = Transaction(
+            date=date(2024, 3, 1),
+            type=TransactionType.DIVIDEND,
+            symbol="AAPL",
+            currency=Currency.USD,
+            amount=Decimal("12"),
+        )
+        standalone_fee = Transaction(
+            date=date(2024, 3, 2),
+            type=TransactionType.FEE,
+            symbol="AAPL",
+            currency=Currency.USD,
+            amount=Decimal("3"),
+        )
+
+        flows = build_xirr_cashflows(
+            [dividend, standalone_fee], self._identity, Decimal("0"), date(2024, 6, 1)
+        )
+
+        assert flows == [(date(2024, 3, 1), Decimal("12")), (date(2024, 3, 2), Decimal("-3"))]
+
+    def test_appends_terminal_value(self):
+        flows = build_xirr_cashflows(
+            [self._buy(date(2024, 1, 1))], self._identity, Decimal("1200"), date(2024, 6, 1)
+        )
+
+        assert flows[-1] == (date(2024, 6, 1), Decimal("1200"))
+
+    def test_skips_terminal_when_zero(self):
+        flows = build_xirr_cashflows(
+            [self._buy(date(2024, 1, 1))], self._identity, Decimal("0"), date(2024, 6, 1)
+        )
+
+        assert len(flows) == 1
+
+    def test_applies_convert_with_date_and_currency(self):
+        flows = build_xirr_cashflows(
+            [self._buy(date(2024, 1, 1), currency=Currency.USD)],
+            lambda on, currency, amount: amount * Decimal("2"),
+            Decimal("0"),
+            date(2024, 6, 1),
+        )
+
+        assert flows == [(date(2024, 1, 1), Decimal("-2010"))]
+
+    def test_round_trip_through_xirr(self):
+        # Buy 1000 out, value 1100 a year later -> ~10% money-weighted return.
+        buy = self._buy(date(2024, 1, 1), qty="10", price="100", fee="0")
+        flows = build_xirr_cashflows([buy], self._identity, Decimal("1100"), date(2025, 1, 1))
+
+        assert abs(xirr(flows) - Decimal("10")) < Decimal("0.5")

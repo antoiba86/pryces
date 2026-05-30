@@ -7,7 +7,7 @@ from ...application.importers import ImporterRegistry
 from ...application.interfaces import LoggerFactory
 from ...infrastructure.configs import CONFIGS_DIR, ConfigStore
 from ...infrastructure.factories import SettingsFactory
-from ...infrastructure.fx import YahooFinanceFxProvider
+from ...infrastructure.fx import YahooFinanceFxProvider, YahooFinanceHistoricalFxProvider
 from ...infrastructure.importers.degiro import DegiroCsvImporter
 from ...infrastructure.importers.ibkr import IbkrFlexImporter
 from ...infrastructure.importers.json_ledger import JsonLedgerImporter
@@ -34,6 +34,7 @@ def _create_menu(logger_factory: LoggerFactory) -> InteractiveMenu:
 
     portfolio_repository = JsonPortfolioRepository()
     fx_provider = YahooFinanceFxProvider(provider, logger_factory)
+    historical_fx_provider = YahooFinanceHistoricalFxProvider(logger_factory)
     symbol_resolver = CachedSymbolResolver(
         YahooSymbolResolver(logger_factory), JsonSymbolMap(), logger_factory
     )
@@ -48,6 +49,7 @@ def _create_menu(logger_factory: LoggerFactory) -> InteractiveMenu:
         config_store=ConfigStore(CONFIGS_DIR),
         portfolio_repository=portfolio_repository,
         fx_provider=fx_provider,
+        historical_fx_provider=historical_fx_provider,
         importer_registry=importer_registry,
         symbol_resolver=symbol_resolver,
         portfolio_formatter=TelegramPortfolioFormatter(),

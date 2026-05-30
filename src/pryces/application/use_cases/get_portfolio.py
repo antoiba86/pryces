@@ -1,10 +1,25 @@
+from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 
 from ...domain.portfolio.holdings import active_holdings, replay
 from ...domain.portfolio.portfolio import Portfolio, Position
+from ...domain.portfolio.returns import XirrConvergenceError, build_xirr_cashflows, xirr
+from ...domain.portfolio.transactions import Transaction
 from ...domain.stocks import Currency
 from ..exceptions import PortfolioNotFound
-from ..interfaces import FxRateProvider, PortfolioRepository, StockProvider
+from ..interfaces import (
+    FxRateProvider,
+    HistoricalFxRateProvider,
+    PortfolioRepository,
+    StockProvider,
+)
+
+
+class _MissingRate(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -19,10 +34,16 @@ class GetPortfolio:
         repository: PortfolioRepository,
         stock_provider: StockProvider,
         fx_provider: FxRateProvider,
+        historical_fx_provider: HistoricalFxRateProvider | None = None,
+        clock: Callable[[], date] | None = None,
     ) -> None:
         self._repository = repository
         self._stock_provider = stock_provider
         self._fx_provider = fx_provider
+        # Optional: when supplied, the use case computes a money-weighted XIRR
+        # from the full transaction history (date-accurate FX conversion).
+        self._historical_fx = historical_fx_provider
+        self._clock = clock if clock is not None else date.today
 
     def handle(self, request: GetPortfolioRequest) -> Portfolio:
         summary = self._repository.find_summary_by_name(request.name, user_id=request.user_id)
@@ -74,4 +95,46 @@ class GetPortfolio:
             base_currency=summary.base_currency,
             positions=tuple(positions),
             manual_assets=tuple(manual_assets),
+            xirr_pct=self._compute_xirr(transactions, base_currency, positions),
         )
+
+    def _compute_xirr(
+        self,
+        transactions: list[Transaction],
+        base_currency: Currency,
+        positions: list[Position],
+    ) -> Decimal | None:
+        if self._historical_fx is None or not transactions:
+            return None
+
+        rates = self._gather_rates(transactions, base_currency)
+        terminal_value = sum((position.value_base for position in positions), Decimal("0"))
+
+        def convert(on: date, currency: Currency, amount: Decimal) -> Decimal:
+            if currency == base_currency:
+                return amount
+            rate = rates.get((currency, on))
+            if rate is None:
+                raise _MissingRate()
+            return amount * rate
+
+        try:
+            cashflows = build_xirr_cashflows(transactions, convert, terminal_value, self._clock())
+            return xirr(cashflows)
+        except (ValueError, XirrConvergenceError, _MissingRate):
+            return None
+
+    def _gather_rates(
+        self, transactions: list[Transaction], base_currency: Currency
+    ) -> dict[tuple[Currency, date], Decimal]:
+        dates_by_currency: dict[Currency, set[date]] = defaultdict(set)
+        for transaction in transactions:
+            if transaction.currency != base_currency:
+                dates_by_currency[transaction.currency].add(transaction.date)
+
+        lookup: dict[tuple[Currency, date], Decimal] = {}
+        for currency, dates in dates_by_currency.items():
+            rates = self._historical_fx.get_rates(base_currency, currency, sorted(dates))
+            for on, rate in rates.items():
+                lookup[(currency, on)] = rate
+        return lookup

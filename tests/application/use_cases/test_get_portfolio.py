@@ -200,3 +200,84 @@ class TestGetPortfolio:
         self.mock_repository.find_summary_by_name.assert_called_once_with("main", user_id=42)
         self.mock_repository.get_transactions.assert_called_once_with("main", user_id=42)
         self.mock_repository.get_manual_assets.assert_called_once_with("main", user_id=42)
+
+
+class _FakeHistoricalFx:
+    def __init__(self, rates=None):
+        self.rates = rates or {}
+        self.calls = []
+
+    def get_rates(self, base, quote, dates):
+        self.calls.append((base, quote, tuple(dates)))
+        if quote == base:
+            return {d: Decimal("1") for d in dates}
+        return {d: self.rates.get((quote, d)) for d in dates if (quote, d) in self.rates}
+
+
+class TestGetPortfolioXirr:
+
+    def _use_case(self, historical):
+        return GetPortfolio(
+            repository=self.repo,
+            stock_provider=self.stock,
+            fx_provider=self.fx,
+            historical_fx_provider=historical,
+            clock=lambda: date(2025, 1, 1),
+        )
+
+    def setup_method(self):
+        self.repo = Mock(spec=PortfolioRepository)
+        self.stock = Mock(spec=StockProvider)
+        self.fx = Mock(spec=FxRateProvider)
+        self.repo.get_manual_assets.return_value = []
+
+    def test_xirr_none_without_historical_provider(self):
+        use_case = GetPortfolio(self.repo, self.stock, self.fx)
+        self.repo.find_summary_by_name.return_value = _summary(base="USD")
+        self.repo.get_transactions.return_value = [_buy("AAPL", "10", "100", Currency.USD)]
+        self.stock.get_stocks.return_value = [_live("AAPL", "150")]
+        self.fx.get_rates.return_value = {Currency.USD: Decimal("1")}
+
+        result = use_case.handle(GetPortfolioRequest(name="main"))
+
+        assert result.xirr_pct is None
+
+    def test_computes_xirr_for_base_currency_holdings(self):
+        self.repo.find_summary_by_name.return_value = _summary(base="USD")
+        self.repo.get_transactions.return_value = [
+            _buy("AAPL", "10", "100", Currency.USD, fee="0", when=date(2024, 1, 1)),
+        ]
+        self.stock.get_stocks.return_value = [_live("AAPL", "110")]
+        self.fx.get_rates.return_value = {Currency.USD: Decimal("1")}
+
+        result = self._use_case(_FakeHistoricalFx()).handle(GetPortfolioRequest(name="main"))
+
+        # -1000 on 2024-01-01, +1100 value on 2025-01-01 -> ~10% annualized.
+        assert abs(result.xirr_pct - Decimal("10")) < Decimal("0.5")
+
+    def test_uses_historical_fx_for_foreign_currency(self):
+        self.repo.find_summary_by_name.return_value = _summary(base="EUR")
+        self.repo.get_transactions.return_value = [
+            _buy("AAPL", "10", "100", Currency.USD, fee="0", when=date(2024, 1, 1)),
+        ]
+        self.stock.get_stocks.return_value = [_live("AAPL", "110")]
+        self.fx.get_rates.return_value = {Currency.USD: Decimal("1")}  # current: 1 USD = 1 EUR
+        historical = _FakeHistoricalFx({(Currency.USD, date(2024, 1, 1)): Decimal("1")})
+
+        result = self._use_case(historical).handle(GetPortfolioRequest(name="main"))
+
+        assert historical.calls  # historical FX was consulted
+        assert abs(result.xirr_pct - Decimal("10")) < Decimal("0.5")
+
+    def test_xirr_none_when_historical_rate_missing(self):
+        self.repo.find_summary_by_name.return_value = _summary(base="EUR")
+        self.repo.get_transactions.return_value = [
+            _buy("AAPL", "10", "100", Currency.USD, fee="0", when=date(2024, 1, 1)),
+        ]
+        self.stock.get_stocks.return_value = [_live("AAPL", "110")]
+        self.fx.get_rates.return_value = {Currency.USD: Decimal("1")}
+        historical = _FakeHistoricalFx(rates={})  # no rate for the trade date
+
+        result = self._use_case(historical).handle(GetPortfolioRequest(name="main"))
+
+        assert result.xirr_pct is None
