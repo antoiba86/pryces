@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from pryces.domain.portfolio.portfolio import ManualAsset, PortfolioSummary
 from pryces.domain.portfolio.transactions import ImportResult, Instrument, Transaction
 from pryces.domain.stock_statistics import StockStatistics
+from datetime import date
 from decimal import Decimal
 
 from pryces.domain.stocks import Currency, Stock
@@ -53,6 +54,15 @@ class SymbolResolver(ABC):
     def resolve(self, instrument: Instrument) -> str | None:
         # Maps a broker-provided Instrument to a Yahoo ticker. Returns None when
         # no ticker can be determined (the caller keeps the original symbol).
+        pass
+
+
+class HistoricalFxRateProvider(ABC):
+    @abstractmethod
+    def get_rates(self, base: Currency, quote: Currency, dates: list[date]) -> dict[date, Decimal]:
+        # Rate-per-quote-unit in the base currency on each requested date, using
+        # the nearest prior trading day. Quotes equal to base map every date to
+        # Decimal("1"). Dates with no available rate are omitted.
         pass
 
 
