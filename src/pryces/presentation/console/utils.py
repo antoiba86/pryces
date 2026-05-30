@@ -6,6 +6,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from pryces.application.dtos import StockDTO
+from pryces.domain.portfolio.portfolio import PortfolioSummary
+from pryces.domain.stocks import Currency
 from pryces.infrastructure.configs import MonitorStocksConfig, SymbolConfig
 
 _MONITOR_MODULE = "pryces.presentation.scripts.monitor_stocks"
@@ -122,6 +124,26 @@ def create_config_selection_validator(count: int) -> Callable[[str], str | None]
         return f"Must be a number between 1 and {count}."
 
     return validator
+
+
+def create_portfolio_selection_validator(count: int) -> Callable[[str], str | None]:
+    return create_config_selection_validator(count)
+
+
+def validate_currency(value: str) -> str | None:
+    if value and value.strip().upper() in Currency.__members__:
+        return None
+    supported = ", ".join(currency.value for currency in Currency)
+    return f"Unsupported currency. Choose one of: {supported}."
+
+
+def format_portfolio_list(summaries: list[PortfolioSummary]) -> str:
+    header = f"Found {len(summaries)} portfolio(s):"
+    entries = [
+        f"  {i + 1}. {s.name} ({s.base_currency}, {s.transaction_count} txns)"
+        for i, s in enumerate(summaries)
+    ]
+    return "\n".join([header] + entries) + "\n"
 
 
 def validate_symbols_with_targets(value: str) -> str | None:

@@ -5,20 +5,24 @@ from unittest.mock import Mock, patch
 from pryces.presentation.console.utils import (
     create_config_selection_validator,
     create_monitor_selection_validator,
+    create_portfolio_selection_validator,
     format_config_details,
     format_config_list,
+    format_portfolio_list,
     format_running_monitors,
     format_stock,
     format_stock_list,
     get_running_monitors,
     parse_symbols_input,
     parse_symbols_with_targets,
+    validate_currency,
     validate_file_path,
     validate_positive_integer,
     validate_symbol,
     validate_symbols,
     validate_symbols_with_targets,
 )
+from pryces.domain.portfolio.portfolio import PortfolioSummary
 from pryces.infrastructure.configs import MonitorStocksConfig, SymbolConfig
 from pryces.domain.stocks import Currency
 from tests.fixtures.factories import create_stock_dto
@@ -542,3 +546,42 @@ class TestParseSymbolsWithTargets:
         assert result[1].symbol == "MSFT"
         assert result[1].prices == [Decimal("200"), Decimal("210")]
         assert result[2].symbol == "GOOG"
+
+
+class TestValidateCurrency:
+
+    def test_accepts_supported_currency_case_insensitive(self):
+        assert validate_currency("eur") is None
+
+    def test_rejects_unknown_currency(self):
+        assert validate_currency("XYZ") is not None
+
+    def test_rejects_blank(self):
+        assert validate_currency("") is not None
+
+
+class TestCreatePortfolioSelectionValidator:
+
+    def test_accepts_in_range(self):
+        validator = create_portfolio_selection_validator(3)
+        assert validator("2") is None
+
+    def test_rejects_out_of_range(self):
+        validator = create_portfolio_selection_validator(3)
+        assert validator("4") is not None
+
+    def test_rejects_non_numeric(self):
+        validator = create_portfolio_selection_validator(3)
+        assert validator("x") is not None
+
+
+class TestFormatPortfolioList:
+
+    def test_includes_name_currency_and_count(self):
+        summaries = [PortfolioSummary(name="main", base_currency="EUR", transaction_count=4)]
+
+        output = format_portfolio_list(summaries)
+
+        assert "main" in output
+        assert "EUR" in output
+        assert "4" in output
