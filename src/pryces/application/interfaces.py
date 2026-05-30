@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from pryces.domain.portfolio.portfolio import ManualAsset, PortfolioSummary
-from pryces.domain.portfolio.transactions import ImportResult, Transaction
+from pryces.domain.portfolio.transactions import ImportResult, Instrument, Transaction
 from pryces.domain.stock_statistics import StockStatistics
 from decimal import Decimal
 
@@ -45,6 +45,14 @@ class TransactionImporter(ABC):
         # Returns parsed transactions plus non-fatal warnings. Raises
         # UnrecognizedImportFormat only when the content is structurally
         # unrecognized (e.g. parse() called on content can_parse() rejected).
+        pass
+
+
+class SymbolResolver(ABC):
+    @abstractmethod
+    def resolve(self, instrument: Instrument) -> str | None:
+        # Maps a broker-provided Instrument to a Yahoo ticker. Returns None when
+        # no ticker can be determined (the caller keeps the original symbol).
         pass
 
 
