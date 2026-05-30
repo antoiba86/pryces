@@ -232,6 +232,19 @@ python -m pryces.presentation.scripts.report_stocks_statistics --verbose
 
 If no symbols are tracked (all config files are empty or `configs/` is empty), the script exits without sending any messages.
 
+#### Report Portfolio
+
+Fetches a named portfolio (live prices, FX rates, and the money-weighted XIRR), formats it, and pushes the report to Telegram. Runs once and exits — intended for scheduled use (e.g. a daily cron job alongside the statistics report).
+
+```bash
+# or using Python
+source venv/bin/activate
+python -m pryces.presentation.scripts.report_portfolio --portfolio main
+python -m pryces.presentation.scripts.report_portfolio --portfolio main --verbose
+```
+
+If the named portfolio doesn't exist, the script logs an error and exits without sending anything.
+
 ### Interactive CLI
 
 Launch the interactive menu:
