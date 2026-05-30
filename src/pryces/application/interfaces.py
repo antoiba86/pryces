@@ -66,6 +66,14 @@ class HistoricalFxRateProvider(ABC):
         pass
 
 
+class HistoricalPriceProvider(ABC):
+    @abstractmethod
+    def get_prices(self, symbol: str, dates: list[date]) -> dict[date, Decimal]:
+        # Close price for the symbol on each requested date, using the nearest
+        # prior trading day. Dates with no available price are omitted.
+        pass
+
+
 class StockRepository(ABC):
     @abstractmethod
     def save_batch(self, stocks: list[Stock]) -> None:

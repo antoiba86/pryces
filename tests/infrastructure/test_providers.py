@@ -453,3 +453,50 @@ class TestYahooFinanceStatisticsMapper:
         )
         assert one_day is not None
         assert one_day.close_price == Decimal("148.0")
+
+
+from datetime import date as _date
+
+from pryces.infrastructure.providers import YahooFinanceHistoricalPriceProvider
+
+
+class _StubLoggerFactory:
+    def get_logger(self, name):
+        return Mock()
+
+
+class TestYahooFinanceHistoricalPriceProvider:
+
+    def _provider(self, fetcher):
+        return YahooFinanceHistoricalPriceProvider(_StubLoggerFactory(), history_fetcher=fetcher)
+
+    def test_empty_dates_returns_empty(self):
+        provider = self._provider(lambda symbol, start: {})
+
+        assert provider.get_prices("AAPL", []) == {}
+
+    def test_returns_close_for_requested_date(self):
+        provider = self._provider(lambda symbol, start: {_date(2024, 1, 5): Decimal("150")})
+
+        prices = provider.get_prices("AAPL", [_date(2024, 1, 5)])
+
+        assert prices == {_date(2024, 1, 5): Decimal("150")}
+
+    def test_nearest_prior_for_non_trading_day(self):
+        provider = self._provider(lambda symbol, start: {_date(2024, 1, 5): Decimal("150")})
+
+        prices = provider.get_prices("AAPL", [_date(2024, 1, 7)])  # weekend
+
+        assert prices[_date(2024, 1, 7)] == Decimal("150")
+
+    def test_date_before_series_uses_earliest(self):
+        provider = self._provider(lambda symbol, start: {_date(2024, 1, 10): Decimal("150")})
+
+        prices = provider.get_prices("AAPL", [_date(2024, 1, 1)])
+
+        assert prices[_date(2024, 1, 1)] == Decimal("150")
+
+    def test_unavailable_symbol_yields_no_prices(self):
+        provider = self._provider(lambda symbol, start: {})
+
+        assert provider.get_prices("AAPL", [_date(2024, 1, 1)]) == {}

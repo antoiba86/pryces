@@ -9,7 +9,14 @@ from decimal import Decimal
 import pandas as pd
 import yfinance as yf
 
-from ..application.interfaces import LoggerFactory, StockProvider, StockStatisticsProvider
+from collections.abc import Callable
+
+from ..application.interfaces import (
+    HistoricalPriceProvider,
+    LoggerFactory,
+    StockProvider,
+    StockStatisticsProvider,
+)
 from ..domain.stock_statistics import HistoricalClose, StatisticsPeriod, StockStatistics
 from ..domain.stocks import Currency, InstrumentType, MarketState, Stock
 
@@ -255,3 +262,59 @@ class YahooFinanceStatisticsProvider(StockStatisticsProvider):
             results = list(executor.map(self._get_stock_statistics, symbols))
 
         return [stats for stats in results if stats is not None]
+
+
+# Fetches a daily close series for a Yahoo symbol from `start` to today.
+PriceHistoryFetcher = Callable[[str, date], dict[date, Decimal]]
+
+
+class YahooFinanceHistoricalPriceProvider(HistoricalPriceProvider):
+    """Date-accurate close prices from Yahoo Finance daily history.
+
+    Fetches a symbol's close series once over the requested span and resolves
+    each requested date to its nearest prior trading day (weekends/holidays
+    fall back to the last available close; dates before the series start use
+    the earliest). Symbols that can't be fetched yield no prices. Injects an
+    optional `history_fetcher` for testing.
+    """
+
+    def __init__(
+        self,
+        logger_factory: LoggerFactory,
+        history_fetcher: PriceHistoryFetcher | None = None,
+    ) -> None:
+        self._logger = logger_factory.get_logger(__name__)
+        self._fetch = history_fetcher if history_fetcher is not None else _yahoo_price_history
+
+    def get_prices(self, symbol: str, dates: list[date]) -> dict[date, Decimal]:
+        if not dates:
+            return {}
+        series = self._fetch(symbol, min(dates))
+        if not series:
+            self._logger.warning(f"No historical prices for {symbol}")
+            return {}
+        ordered = sorted(series.items())
+        return {day: price for day in dates if (price := _nearest_prior_price(ordered, day))}
+
+
+def _nearest_prior_price(ordered: list[tuple[date, Decimal]], target: date) -> Decimal | None:
+    chosen: Decimal | None = None
+    for day, price in ordered:
+        if day <= target:
+            chosen = price
+        else:
+            break
+    if chosen is None and ordered:
+        return ordered[0][1]
+    return chosen
+
+
+def _yahoo_price_history(symbol: str, start: date) -> dict[date, Decimal]:
+    history = yf.Ticker(symbol).history(start=start.isoformat())
+    if history.empty or "Close" not in history:
+        return {}
+    return {
+        timestamp.date(): Decimal(str(close))
+        for timestamp, close in history["Close"].items()
+        if close == close  # skip NaN
+    }
