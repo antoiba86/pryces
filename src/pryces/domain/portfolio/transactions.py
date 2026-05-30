@@ -44,9 +44,22 @@ class ImportWarning:
 
 
 @dataclass(frozen=True, slots=True)
+class Instrument:
+    # Carries the broker-provided identity of an instrument so a downstream
+    # SymbolResolver can map it to a Yahoo ticker. `symbol` is whatever the
+    # importer stored on the Transaction (the ISIN for DEGIRO); `name` and
+    # `exchange` are best-effort resolution hints.
+    symbol: str
+    name: str | None = None
+    exchange: str | None = None
+    isin: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ImportResult:
     transactions: tuple[Transaction, ...]
     warnings: tuple[ImportWarning, ...] = ()
+    instruments: tuple[Instrument, ...] = ()
 
 
 class TransactionValidationError(ValueError):
