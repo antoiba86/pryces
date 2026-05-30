@@ -15,6 +15,9 @@ authors = [
 dependencies = [
     "yfinance>=1.2.0",
     "python-dotenv>=1.2.2",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +25,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "black>=26.3.0",
+    "httpx>=0.27",
 ]
 
 [tool.pytest.ini_options]
@@ -41,6 +45,8 @@ omit = [
     "*/__init__.py",
     "*/presentation/console/cli.py",
     "*/presentation/scripts/*",
+    "*/presentation/api/main.py",
+    "*/presentation/api/dependencies.py",
 ]
 
 [tool.coverage.report]
