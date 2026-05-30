@@ -31,9 +31,7 @@ class TestRenamePortfolio:
 
         use_case.handle(request)
 
-        self.mock_repository.rename.assert_called_once_with(
-            old_name="a", new_name="b", user_id=42
-        )
+        self.mock_repository.rename.assert_called_once_with(old_name="a", new_name="b", user_id=42)
 
     def test_handle_propagates_not_found_error(self):
         self.mock_repository.rename.side_effect = PortfolioNotFound("ghost")
