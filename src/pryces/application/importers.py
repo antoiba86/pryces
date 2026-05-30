@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...application.interfaces import LoggerFactory, TransactionImporter
+from .interfaces import LoggerFactory, TransactionImporter
 
 
 class ImporterRegistry:
@@ -8,7 +8,9 @@ class ImporterRegistry:
 
     Auto-detection runs each importer's `can_parse` in registration order and
     returns the first match, so importers must be registered most-specific
-    first (broker CSVs before the generic JSON ledger).
+    first (broker CSVs before the generic JSON ledger). Depends only on the
+    `TransactionImporter` port, so it lives in the application layer; concrete
+    importers are injected at the composition root.
     """
 
     def __init__(

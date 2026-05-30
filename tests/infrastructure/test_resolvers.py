@@ -99,6 +99,31 @@ class TestYahooSymbolResolver:
 
         assert result == "VYTR.MC"
 
+    def test_prefers_exchange_match_from_trimmed_name_over_isin_hit(self):
+        # ISIN search only surfaces a foreign cross-listing; the trimmed name
+        # (verbose share-class suffix stripped) surfaces the home-exchange one.
+        def search(query):
+            if query == "IE00B3XXRP09":
+                return [_quote("VUSD.L", exchange="LSE", quote_type="ETF")]
+            if query == "VANGUARD S&P 500 UCITS ETF":
+                return [
+                    _quote("VUSD.L", exchange="LSE", quote_type="ETF"),
+                    _quote("VUSA.AS", exchange="AMS", quote_type="ETF"),
+                ]
+            return []
+
+        resolver = self._resolver(search)
+        result = resolver.resolve(
+            Instrument(
+                symbol="IE00B3XXRP09",
+                name="VANGUARD S&P 500 UCITS ETF USD DIS",
+                exchange="EAM",
+                isin="IE00B3XXRP09",
+            )
+        )
+
+        assert result == "VUSA.AS"
+
     def test_returns_first_equity_when_exchange_unmatched(self):
         def search(query):
             return [_quote("BAR.XX", exchange="ZZZ"), _quote("BAR.YY", exchange="WWW")]

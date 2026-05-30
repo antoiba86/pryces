@@ -53,3 +53,16 @@ class StockDTO:
 class TargetPriceDTO:
     symbol: str
     target: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class ImportResultDTO:
+    broker: str
+    parsed: int
+    inserted: int
+    unresolved_symbols: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def duplicates(self) -> int:
+        return self.parsed - self.inserted

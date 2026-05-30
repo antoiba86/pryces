@@ -1,5 +1,5 @@
 from pryces.domain.portfolio.transactions import ImportResult
-from pryces.infrastructure.importers.registry import ImporterRegistry
+from pryces.application.importers import ImporterRegistry
 
 
 class _StubLogger:

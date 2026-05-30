@@ -35,11 +35,40 @@ _EXCHANGE_ALIASES: dict[str, set[str]] = {
     "SWX": {"EBS"},
 }
 
+# Trailing share-class / currency tokens that make a broker product name too
+# specific for Yahoo's name search (stripped to broaden the fallback query).
+_NAME_NOISE = {
+    "USD",
+    "EUR",
+    "GBP",
+    "CHF",
+    "JPY",
+    "CAD",
+    "AUD",
+    "ACC",
+    "DIS",
+    "DIST",
+    "INC",
+    "DISTRIBUTING",
+    "ACCUMULATING",
+    "HEDGED",
+}
+
 SearchFn = Callable[[str], list[dict]]
 
 
 def _is_isin(value: str) -> bool:
     return bool(_ISIN_PATTERN.match(value.strip().upper()))
+
+
+def _trimmed_name(name: str | None) -> str | None:
+    if not name:
+        return None
+    tokens = name.split()
+    while tokens and tokens[-1].upper().strip(".") in _NAME_NOISE:
+        tokens.pop()
+    trimmed = " ".join(tokens)
+    return trimmed if trimmed and trimmed != name else None
 
 
 class JsonSymbolMap:
@@ -96,34 +125,45 @@ class YahooSymbolResolver(SymbolResolver):
             # Already a usable ticker (e.g. from the JSON ledger).
             return instrument.symbol
 
+        # Scan every query for a candidate on the instrument's own exchange
+        # first; a venue match anywhere beats the first hit of an earlier query
+        # (e.g. an ISIN search that only surfaces a foreign cross-listing). Only
+        # if no query yields an exchange match do we fall back to the first
+        # equity seen.
+        fallback: str | None = None
         for query in self._queries(isin, instrument.name):
-            ticker = self._resolve_query(query, instrument.exchange)
-            if ticker is not None:
-                return ticker
+            equities = self._equities(query)
+            if not equities:
+                continue
+            matched = self._match_exchange(equities, instrument.exchange)
+            if matched is not None:
+                return matched.get("symbol")
+            if fallback is None:
+                fallback = equities[0].get("symbol")
+        if fallback is not None:
+            return fallback
         self._logger.warning(f"Could not resolve a Yahoo symbol for {isin or instrument.symbol}")
         return None
 
     @staticmethod
     def _queries(isin: str | None, name: str | None) -> list[str]:
-        queries = [value for value in (isin, name) if value]
-        # Preserve order while removing duplicates.
-        return list(dict.fromkeys(queries))
+        # Broker product names are verbose ("... UCITS ETF USD DIS"), which is
+        # too specific for Yahoo's name search; a trimmed variant surfaces the
+        # full set of cross-listings so exchange disambiguation can work.
+        queries = [isin, name, _trimmed_name(name)]
+        return list(dict.fromkeys(value for value in queries if value))
 
-    def _resolve_query(self, query: str, exchange: str | None) -> str | None:
+    def _equities(self, query: str) -> list[dict]:
         try:
             candidates = self._search(query)
         except (urllib.error.URLError, OSError, ValueError) as error:
             self._logger.warning(f"Yahoo search failed for {query!r}: {error}")
-            return None
-        equities = [
+            return []
+        return [
             quote
             for quote in candidates
             if quote.get("quoteType", "").upper() in _EQUITY_QUOTE_TYPES and quote.get("symbol")
         ]
-        if not equities:
-            return None
-        preferred = self._match_exchange(equities, exchange)
-        return (preferred or equities[0]).get("symbol")
 
     @staticmethod
     def _match_exchange(equities: list[dict], exchange: str | None) -> dict | None:
