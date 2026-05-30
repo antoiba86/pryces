@@ -4,21 +4,26 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from ...domain.portfolio.holdings import active_holdings, replay
+from ...domain.portfolio.holdings import Holding, HoldingKey, active_holdings, replay
 from ...domain.portfolio.portfolio import Portfolio, Position
-from ...domain.portfolio.returns import XirrConvergenceError, build_xirr_cashflows, xirr
+from ...domain.portfolio.returns import XirrConvergenceError, build_xirr_cashflows, twr, xirr
 from ...domain.portfolio.transactions import Transaction
 from ...domain.stocks import Currency
 from ..exceptions import PortfolioNotFound
 from ..interfaces import (
     FxRateProvider,
     HistoricalFxRateProvider,
+    HistoricalPriceProvider,
     PortfolioRepository,
     StockProvider,
 )
 
 
 class _MissingRate(Exception):
+    pass
+
+
+class _MissingData(Exception):
     pass
 
 
@@ -35,6 +40,7 @@ class GetPortfolio:
         stock_provider: StockProvider,
         fx_provider: FxRateProvider,
         historical_fx_provider: HistoricalFxRateProvider | None = None,
+        historical_price_provider: HistoricalPriceProvider | None = None,
         clock: Callable[[], date] | None = None,
     ) -> None:
         self._repository = repository
@@ -43,6 +49,10 @@ class GetPortfolio:
         # Optional: when supplied, the use case computes a money-weighted XIRR
         # from the full transaction history (date-accurate FX conversion).
         self._historical_fx = historical_fx_provider
+        # Optional: with both historical FX and historical prices, the use case
+        # also computes a time-weighted return (TWR) by revaluing the portfolio
+        # at each cashflow boundary.
+        self._historical_price = historical_price_provider
         self._clock = clock if clock is not None else date.today
 
     def handle(self, request: GetPortfolioRequest) -> Portfolio:
@@ -96,6 +106,7 @@ class GetPortfolio:
             positions=tuple(positions),
             manual_assets=tuple(manual_assets),
             xirr_pct=self._compute_xirr(transactions, base_currency, positions),
+            twr_pct=self._compute_twr(transactions, base_currency, positions),
         )
 
     def _compute_xirr(
@@ -136,5 +147,72 @@ class GetPortfolio:
         for currency, dates in dates_by_currency.items():
             rates = self._historical_fx.get_rates(base_currency, currency, sorted(dates))
             for on, rate in rates.items():
+                lookup[(currency, on)] = rate
+        return lookup
+
+    def _compute_twr(
+        self,
+        transactions: list[Transaction],
+        base_currency: Currency,
+        positions: list[Position],
+    ) -> Decimal | None:
+        # TWR needs the portfolio's market value at each cashflow boundary, so
+        # it requires both historical prices and historical FX.
+        if self._historical_price is None or self._historical_fx is None or not transactions:
+            return None
+
+        cashflow_dates = sorted({transaction.date for transaction in transactions})
+        prices = self._gather_prices(transactions, cashflow_dates)
+        rates = self._historical_rates_by_date(transactions, base_currency, cashflow_dates)
+        current_value = sum((position.value_base for position in positions), Decimal("0"))
+        today = self._clock()
+
+        def value_at(holdings: dict[HoldingKey, Holding], on: date) -> Decimal:
+            total = Decimal("0")
+            for holding in holdings.values():
+                price = prices.get((holding.symbol, on))
+                rate = (
+                    Decimal("1")
+                    if holding.currency == base_currency
+                    else rates.get((holding.currency, on))
+                )
+                if price is None or rate is None:
+                    raise _MissingData()
+                total += holding.quantity * price * rate
+            return total
+
+        try:
+            sub_periods: list[tuple[Decimal, Decimal]] = []
+            for index, start_date in enumerate(cashflow_dates):
+                # Holdings are constant between consecutive cashflows, so the
+                # sub-period return is pure price/FX movement of the same basket.
+                held = active_holdings(replay([t for t in transactions if t.date <= start_date]))
+                if not held:
+                    continue
+                start_value = value_at(held, start_date)
+                is_last = index + 1 == len(cashflow_dates)
+                end_value = current_value if is_last else value_at(held, cashflow_dates[index + 1])
+                sub_periods.append((start_value, end_value))
+            return twr(sub_periods) if sub_periods else None
+        except (ValueError, _MissingData):
+            return None
+
+    def _gather_prices(
+        self, transactions: list[Transaction], dates: list[date]
+    ) -> dict[tuple[str, date], Decimal]:
+        symbols = {transaction.symbol for transaction in transactions}
+        lookup: dict[tuple[str, date], Decimal] = {}
+        for symbol in symbols:
+            for on, price in self._historical_price.get_prices(symbol, dates).items():
+                lookup[(symbol, on)] = price
+        return lookup
+
+    def _historical_rates_by_date(
+        self, transactions: list[Transaction], base_currency: Currency, dates: list[date]
+    ) -> dict[tuple[Currency, date], Decimal]:
+        currencies = {t.currency for t in transactions if t.currency != base_currency}
+        lookup: dict[tuple[Currency, date], Decimal] = {}
+        for currency in currencies:
+            for on, rate in self._historical_fx.get_rates(base_currency, currency, dates).items():
                 lookup[(currency, on)] = rate
         return lookup

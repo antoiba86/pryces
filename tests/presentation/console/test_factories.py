@@ -4,6 +4,7 @@ from pryces.application.importers import ImporterRegistry
 from pryces.application.interfaces import (
     FxRateProvider,
     HistoricalFxRateProvider,
+    HistoricalPriceProvider,
     MessageSender,
     PortfolioRepository,
     StockProvider,
@@ -28,6 +29,7 @@ def _factory(provider=None):
         portfolio_repository=Mock(spec=PortfolioRepository),
         fx_provider=Mock(spec=FxRateProvider),
         historical_fx_provider=Mock(spec=HistoricalFxRateProvider),
+        historical_price_provider=Mock(spec=HistoricalPriceProvider),
         importer_registry=ImporterRegistry([], Mock()),
         symbol_resolver=Mock(spec=SymbolResolver),
         portfolio_formatter=Mock(spec=PortfolioFormatter),

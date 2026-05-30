@@ -13,7 +13,7 @@ from ...infrastructure.importers.ibkr import IbkrFlexImporter
 from ...infrastructure.importers.json_ledger import JsonLedgerImporter
 from ...infrastructure.logging import PythonLoggerFactory, setup_logging
 from ...infrastructure.portfolio_formatters import TelegramPortfolioFormatter
-from ...infrastructure.providers import YahooFinanceProvider
+from ...infrastructure.providers import YahooFinanceHistoricalPriceProvider, YahooFinanceProvider
 from ...infrastructure.repositories import JsonPortfolioRepository
 from ...infrastructure.resolvers import CachedSymbolResolver, JsonSymbolMap, YahooSymbolResolver
 from ...infrastructure.senders import RetryMessageSender, RetrySettings, TelegramMessageSender
@@ -35,6 +35,7 @@ def _create_menu(logger_factory: LoggerFactory) -> InteractiveMenu:
     portfolio_repository = JsonPortfolioRepository()
     fx_provider = YahooFinanceFxProvider(provider, logger_factory)
     historical_fx_provider = YahooFinanceHistoricalFxProvider(logger_factory)
+    historical_price_provider = YahooFinanceHistoricalPriceProvider(logger_factory)
     symbol_resolver = CachedSymbolResolver(
         YahooSymbolResolver(logger_factory), JsonSymbolMap(), logger_factory
     )
@@ -50,6 +51,7 @@ def _create_menu(logger_factory: LoggerFactory) -> InteractiveMenu:
         portfolio_repository=portfolio_repository,
         fx_provider=fx_provider,
         historical_fx_provider=historical_fx_provider,
+        historical_price_provider=historical_price_provider,
         importer_registry=importer_registry,
         symbol_resolver=symbol_resolver,
         portfolio_formatter=TelegramPortfolioFormatter(),

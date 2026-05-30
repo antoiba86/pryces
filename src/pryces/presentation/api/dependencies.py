@@ -6,6 +6,7 @@ from ...application.importers import ImporterRegistry
 from ...application.interfaces import (
     FxRateProvider,
     HistoricalFxRateProvider,
+    HistoricalPriceProvider,
     LoggerFactory,
     PortfolioRepository,
     StockProvider,
@@ -22,7 +23,7 @@ from ...infrastructure.importers.degiro import DegiroCsvImporter
 from ...infrastructure.importers.ibkr import IbkrFlexImporter
 from ...infrastructure.importers.json_ledger import JsonLedgerImporter
 from ...infrastructure.logging import PythonLoggerFactory
-from ...infrastructure.providers import YahooFinanceProvider
+from ...infrastructure.providers import YahooFinanceHistoricalPriceProvider, YahooFinanceProvider
 from ...infrastructure.repositories import JsonPortfolioRepository
 from ...infrastructure.resolvers import CachedSymbolResolver, JsonSymbolMap, YahooSymbolResolver
 
@@ -57,6 +58,12 @@ def get_historical_fx_provider(
     logger_factory: LoggerFactory = Depends(get_logger_factory),
 ) -> HistoricalFxRateProvider:
     return YahooFinanceHistoricalFxProvider(logger_factory)
+
+
+def get_historical_price_provider(
+    logger_factory: LoggerFactory = Depends(get_logger_factory),
+) -> HistoricalPriceProvider:
+    return YahooFinanceHistoricalPriceProvider(logger_factory)
 
 
 def get_symbol_resolver(
@@ -107,8 +114,15 @@ def get_get_portfolio(
     stock_provider: StockProvider = Depends(get_stock_provider),
     fx_provider: FxRateProvider = Depends(get_fx_provider),
     historical_fx_provider: HistoricalFxRateProvider = Depends(get_historical_fx_provider),
+    historical_price_provider: HistoricalPriceProvider = Depends(get_historical_price_provider),
 ) -> GetPortfolio:
-    return GetPortfolio(repository, stock_provider, fx_provider, historical_fx_provider)
+    return GetPortfolio(
+        repository,
+        stock_provider,
+        fx_provider,
+        historical_fx_provider,
+        historical_price_provider,
+    )
 
 
 def get_import_transactions(

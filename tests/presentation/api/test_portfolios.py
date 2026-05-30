@@ -9,6 +9,7 @@ from pryces.infrastructure.repositories import JsonPortfolioRepository
 from pryces.presentation.api.dependencies import (
     get_fx_provider,
     get_historical_fx_provider,
+    get_historical_price_provider,
     get_portfolio_repository,
     get_stock_provider,
     get_symbol_resolver,
@@ -32,6 +33,11 @@ class _FakeFx:
 class _FakeHistoricalFx:
     def get_rates(self, base, quote, dates):
         return {day: Decimal("1") for day in dates}
+
+
+class _FakeHistoricalPrices:
+    def get_prices(self, symbol, dates):
+        return {day: Decimal("100") for day in dates}
 
 
 class _FakeResolver:
@@ -68,6 +74,7 @@ def client(tmp_path):
     app.dependency_overrides[get_stock_provider] = lambda: _FakeStockProvider()
     app.dependency_overrides[get_fx_provider] = lambda: _FakeFx()
     app.dependency_overrides[get_historical_fx_provider] = lambda: _FakeHistoricalFx()
+    app.dependency_overrides[get_historical_price_provider] = lambda: _FakeHistoricalPrices()
     app.dependency_overrides[get_symbol_resolver] = lambda: _FakeResolver()
     return TestClient(app)
 

@@ -281,3 +281,81 @@ class TestGetPortfolioXirr:
         result = self._use_case(historical).handle(GetPortfolioRequest(name="main"))
 
         assert result.xirr_pct is None
+
+
+class _FakeHistoricalPrices:
+    def __init__(self, prices):
+        # prices: dict[symbol -> dict[date -> Decimal]]
+        self.prices = prices
+
+    def get_prices(self, symbol, dates):
+        series = self.prices.get(symbol, {})
+        return {d: series[d] for d in dates if d in series}
+
+
+class TestGetPortfolioTwr:
+
+    def setup_method(self):
+        self.repo = Mock(spec=PortfolioRepository)
+        self.stock = Mock(spec=StockProvider)
+        self.fx = Mock(spec=FxRateProvider)
+        self.repo.get_manual_assets.return_value = []
+
+    def _use_case(self, historical_prices):
+        return GetPortfolio(
+            repository=self.repo,
+            stock_provider=self.stock,
+            fx_provider=self.fx,
+            historical_fx_provider=_FakeHistoricalFx(),
+            historical_price_provider=historical_prices,
+            clock=lambda: date(2025, 1, 1),
+        )
+
+    def test_twr_none_without_historical_price_provider(self):
+        use_case = GetPortfolio(
+            self.repo, self.stock, self.fx, _FakeHistoricalFx(), None, lambda: date(2025, 1, 1)
+        )
+        self.repo.find_summary_by_name.return_value = _summary(base="USD")
+        self.repo.get_transactions.return_value = [_buy("AAPL", "10", "100", Currency.USD)]
+        self.stock.get_stocks.return_value = [_live("AAPL", "110")]
+        self.fx.get_rates.return_value = {Currency.USD: Decimal("1")}
+
+        result = use_case.handle(GetPortfolioRequest(name="main"))
+
+        assert result.twr_pct is None
+
+    def test_chains_sub_period_returns(self):
+        # AAPL +10% (100->110) over period 1; after buying MSFT the basket grows
+        # another +10% (2100 -> 2310). TWR = 1.1 * 1.1 - 1 = 21%, independent of
+        # the size of the mid-period MSFT purchase.
+        self.repo.find_summary_by_name.return_value = _summary(base="USD")
+        self.repo.get_transactions.return_value = [
+            _buy("AAPL", "10", "100", Currency.USD, when=date(2024, 1, 1)),
+            _buy("MSFT", "5", "200", Currency.USD, when=date(2024, 6, 1)),
+        ]
+        self.stock.get_stocks.return_value = [_live("AAPL", "121"), _live("MSFT", "220")]
+        self.fx.get_rates.return_value = {Currency.USD: Decimal("1")}
+        prices = _FakeHistoricalPrices(
+            {
+                "AAPL": {date(2024, 1, 1): Decimal("100"), date(2024, 6, 1): Decimal("110")},
+                "MSFT": {date(2024, 6, 1): Decimal("200")},
+            }
+        )
+
+        result = self._use_case(prices).handle(GetPortfolioRequest(name="main"))
+
+        assert result.twr_pct.quantize(Decimal("0.01")) == Decimal("21.00")
+
+    def test_twr_none_when_historical_price_missing(self):
+        self.repo.find_summary_by_name.return_value = _summary(base="USD")
+        self.repo.get_transactions.return_value = [
+            _buy("AAPL", "10", "100", Currency.USD, when=date(2024, 1, 1)),
+            _buy("MSFT", "5", "200", Currency.USD, when=date(2024, 6, 1)),
+        ]
+        self.stock.get_stocks.return_value = [_live("AAPL", "121"), _live("MSFT", "220")]
+        self.fx.get_rates.return_value = {Currency.USD: Decimal("1")}
+        prices = _FakeHistoricalPrices({})  # no historical prices at all
+
+        result = self._use_case(prices).handle(GetPortfolioRequest(name="main"))
+
+        assert result.twr_pct is None

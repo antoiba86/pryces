@@ -2,6 +2,7 @@ from ...application.importers import ImporterRegistry
 from ...application.interfaces import (
     FxRateProvider,
     HistoricalFxRateProvider,
+    HistoricalPriceProvider,
     LoggerFactory,
     MessageSender,
     PortfolioRepository,
@@ -44,6 +45,7 @@ class CommandFactory:
         portfolio_repository: PortfolioRepository,
         fx_provider: FxRateProvider,
         historical_fx_provider: HistoricalFxRateProvider,
+        historical_price_provider: HistoricalPriceProvider,
         importer_registry: ImporterRegistry,
         symbol_resolver: SymbolResolver,
         portfolio_formatter: PortfolioFormatter,
@@ -55,6 +57,7 @@ class CommandFactory:
         self._portfolio_repository = portfolio_repository
         self._fx_provider = fx_provider
         self._historical_fx_provider = historical_fx_provider
+        self._historical_price_provider = historical_price_provider
         self._importer_registry = importer_registry
         self._symbol_resolver = symbol_resolver
         self._portfolio_formatter = portfolio_formatter
@@ -79,6 +82,7 @@ class CommandFactory:
                 self._stock_provider,
                 self._fx_provider,
                 self._historical_fx_provider,
+                self._historical_price_provider,
             ),
             self._portfolio_formatter,
             self._message_sender,
