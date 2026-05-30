@@ -20,3 +20,9 @@ class PortfolioAlreadyExists(Exception):
     def __init__(self, name: str) -> None:
         self.name = name
         super().__init__(f"Portfolio already exists: {name}")
+
+
+class UnrecognizedImportFormat(Exception):
+    def __init__(self, broker_id: str) -> None:
+        self.broker_id = broker_id
+        super().__init__(f"Content is not a valid {broker_id} import")

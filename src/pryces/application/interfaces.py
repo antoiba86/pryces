@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from pryces.domain.portfolio.portfolio import ManualAsset, PortfolioSummary
-from pryces.domain.portfolio.transactions import Transaction
+from pryces.domain.portfolio.transactions import ImportResult, Transaction
 from pryces.domain.stock_statistics import StockStatistics
 from decimal import Decimal
 
@@ -26,6 +26,25 @@ class FxRateProvider(ABC):
         # Returns rate-per-quote-unit in the base currency (so 1 USD = rate[USD] EUR
         # when base is EUR). Quotes equal to base map to Decimal("1"). Quotes for
         # which no rate is available are omitted.
+        pass
+
+
+class TransactionImporter(ABC):
+    @property
+    @abstractmethod
+    def broker_id(self) -> str:
+        pass
+
+    @abstractmethod
+    def can_parse(self, content: str) -> bool:
+        # Fast shape/header sniff used for auto-detection. No I/O, no exceptions.
+        pass
+
+    @abstractmethod
+    def parse(self, content: str) -> ImportResult:
+        # Returns parsed transactions plus non-fatal warnings. Raises
+        # UnrecognizedImportFormat only when the content is structurally
+        # unrecognized (e.g. parse() called on content can_parse() rejected).
         pass
 
 
