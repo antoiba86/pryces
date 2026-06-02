@@ -8,7 +8,9 @@ from ...application.dtos import ImportResultDTO
 from ...domain.portfolio.portfolio import (
     ClosedPosition,
     ManualAsset,
+    Overview,
     Portfolio,
+    PortfolioBreakdown,
     PortfolioSummary,
     Position,
 )
@@ -133,6 +135,36 @@ class PortfolioResponse(BaseModel):
             total_return_pct=str(portfolio.total_return_pct),
             xirr_pct=_str(portfolio.xirr_pct),
             twr_pct=_str(portfolio.twr_pct),
+        )
+
+
+class PortfolioBreakdownItem(BaseModel):
+    name: str
+    base_currency: str
+    total_value: str
+    total_profit: str
+    total_return_pct: str
+
+    @classmethod
+    def from_breakdown(cls, item: PortfolioBreakdown) -> PortfolioBreakdownItem:
+        return cls(
+            name=item.name,
+            base_currency=item.base_currency,
+            total_value=str(item.total_value),
+            total_profit=str(item.total_profit),
+            total_return_pct=str(item.total_return_pct),
+        )
+
+
+class OverviewResponse(BaseModel):
+    portfolio: PortfolioResponse
+    breakdown: list[PortfolioBreakdownItem]
+
+    @classmethod
+    def from_overview(cls, overview: Overview) -> OverviewResponse:
+        return cls(
+            portfolio=PortfolioResponse.from_portfolio(overview.portfolio),
+            breakdown=[PortfolioBreakdownItem.from_breakdown(b) for b in overview.breakdown],
         )
 
 

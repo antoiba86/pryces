@@ -161,6 +161,27 @@ class PortfolioSummary:
     transaction_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class PortfolioBreakdown:
+    """A single portfolio's contribution to the unified overview (values in the
+    overview's base currency; `base_currency` is the portfolio's own, for display)."""
+
+    name: str
+    base_currency: str
+    total_value: Decimal
+    total_profit: Decimal
+    total_return_pct: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class Overview:
+    """Unified net-worth rollup: one combined Portfolio (positions merged across
+    all portfolios) plus a per-portfolio breakdown for drill-down."""
+
+    portfolio: Portfolio
+    breakdown: tuple[PortfolioBreakdown, ...] = ()
+
+
 def _merge_positions(symbol: str, group: list[Position]) -> Position:
     total_quantity = sum((p.quantity for p in group), Decimal("0"))
     cost_native = sum((p.avg_cost * p.quantity for p in group), Decimal("0"))

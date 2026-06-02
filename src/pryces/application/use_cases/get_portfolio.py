@@ -11,7 +11,7 @@ from ...domain.portfolio.holdings import (
     closed_holdings,
     replay,
 )
-from ...domain.portfolio.portfolio import ClosedPosition, Portfolio, Position
+from ...domain.portfolio.portfolio import ClosedPosition, ManualAsset, Portfolio, Position
 from ...domain.portfolio.returns import XirrConvergenceError, build_xirr_cashflows, twr, xirr
 from ...domain.portfolio.transactions import Transaction
 from ...domain.stocks import Currency
@@ -68,14 +68,23 @@ class GetPortfolio:
 
         transactions = self._repository.get_transactions(request.name, user_id=request.user_id)
         manual_assets = self._repository.get_manual_assets(request.name, user_id=request.user_id)
-        base_currency = Currency(summary.base_currency)
+        return self.build(transactions, manual_assets, Currency(summary.base_currency))
 
+    def build(
+        self,
+        transactions: list[Transaction],
+        manual_assets: list[ManualAsset],
+        base_currency: Currency,
+    ) -> Portfolio:
+        """Build a Portfolio aggregate from a transaction log + manual assets in
+        the given base currency. Shared by GetPortfolio (one portfolio) and
+        GetOverview (the union of all portfolios)."""
         all_holdings = replay(transactions)
         active = active_holdings(all_holdings)
         closed = closed_holdings(all_holdings)
         if not active and not closed:
             return Portfolio(
-                base_currency=summary.base_currency,
+                base_currency=base_currency.value,
                 manual_assets=tuple(manual_assets),
             )
 
@@ -137,15 +146,34 @@ class GetPortfolio:
         closed_positions = [
             self._build_closed(holding, rate_at, stocks) for holding in closed.values()
         ]
+        terminal_value = sum((position.value_base for position in positions), Decimal("0"))
 
         return Portfolio(
-            base_currency=summary.base_currency,
+            base_currency=base_currency.value,
             positions=tuple(positions),
             manual_assets=tuple(manual_assets),
             closed_positions=tuple(closed_positions),
-            xirr_pct=self._compute_xirr(transactions, base_currency, positions, historical_rates),
-            twr_pct=self._compute_twr(transactions, base_currency, positions),
+            xirr_pct=self._compute_xirr(
+                transactions, base_currency, terminal_value, historical_rates
+            ),
+            twr_pct=self._compute_twr(transactions, base_currency, terminal_value),
         )
+
+    def compute_returns(
+        self,
+        transactions: list[Transaction],
+        base_currency: Currency,
+        terminal_value: Decimal,
+    ) -> tuple[Decimal | None, Decimal | None]:
+        """(xirr_pct, twr_pct) for an arbitrary transaction set and terminal
+        value — lets GetOverview reuse the return math over the union of all
+        portfolios' transactions."""
+        historical_rates = (
+            self._gather_rates(transactions, base_currency) if self._historical_fx else {}
+        )
+        xirr_pct = self._compute_xirr(transactions, base_currency, terminal_value, historical_rates)
+        twr_pct = self._compute_twr(transactions, base_currency, terminal_value)
+        return xirr_pct, twr_pct
 
     def _realized_base(
         self,
@@ -199,13 +227,11 @@ class GetPortfolio:
         self,
         transactions: list[Transaction],
         base_currency: Currency,
-        positions: list[Position],
+        terminal_value: Decimal,
         historical_rates: dict[tuple[Currency, date], Decimal],
     ) -> Decimal | None:
         if self._historical_fx is None or not transactions:
             return None
-
-        terminal_value = sum((position.value_base for position in positions), Decimal("0"))
 
         def convert(on: date, currency: Currency, amount: Decimal) -> Decimal:
             if currency == base_currency:
@@ -240,7 +266,7 @@ class GetPortfolio:
         self,
         transactions: list[Transaction],
         base_currency: Currency,
-        positions: list[Position],
+        terminal_value: Decimal,
     ) -> Decimal | None:
         # TWR needs the portfolio's market value at each cashflow boundary, so
         # it requires both historical prices and historical FX.
@@ -250,7 +276,7 @@ class GetPortfolio:
         cashflow_dates = sorted({transaction.date for transaction in transactions})
         prices = self._gather_prices(transactions, cashflow_dates)
         rates = self._historical_rates_by_date(transactions, base_currency, cashflow_dates)
-        current_value = sum((position.value_base for position in positions), Decimal("0"))
+        current_value = terminal_value
         today = self._clock()
 
         def value_at(holdings: dict[HoldingKey, Holding], on: date) -> Decimal:

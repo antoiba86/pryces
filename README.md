@@ -258,6 +258,7 @@ uvicorn pryces.presentation.api.main:app --port 8000
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness check |
+| GET | `/overview` | Unified net-worth rollup across all portfolios (combined totals, merged positions, one XIRR/TWR, and a per-portfolio breakdown) |
 | GET | `/portfolios` | List portfolios |
 | POST | `/portfolios` | Create a portfolio (`{"base_currency": "EUR", "name": "main"}`) |
 | GET | `/portfolios/{name}` | Portfolio with live prices, open + closed positions, totals (incl. realized P&L and total profit), XIRR, and TWR |

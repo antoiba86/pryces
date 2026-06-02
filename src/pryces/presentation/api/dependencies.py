@@ -14,6 +14,7 @@ from ...application.interfaces import (
 )
 from ...application.use_cases.create_portfolio import CreatePortfolio
 from ...application.use_cases.delete_portfolio import DeletePortfolio
+from ...application.use_cases.get_overview import GetOverview
 from ...application.use_cases.get_portfolio import GetPortfolio
 from ...application.use_cases.import_transactions import ImportTransactions
 from ...application.use_cases.list_portfolios import ListPortfolios
@@ -123,6 +124,13 @@ def get_get_portfolio(
         historical_fx_provider,
         historical_price_provider,
     )
+
+
+def get_overview(
+    repository: PortfolioRepository = Depends(get_portfolio_repository),
+    portfolio_builder: GetPortfolio = Depends(get_get_portfolio),
+) -> GetOverview:
+    return GetOverview(repository, portfolio_builder)
 
 
 def get_import_transactions(
