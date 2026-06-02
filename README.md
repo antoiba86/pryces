@@ -305,7 +305,7 @@ Available commands:
 | 9 | List Portfolios | List all portfolios with base currency and transaction count |
 | 10 | Create Portfolio | Create a new portfolio (name optional, base currency) |
 | 11 | Show Portfolio | Show a portfolio with live prices (optionally send to Telegram) |
-| 12 | Import Transactions | Import a broker export (DEGIRO CSV / IBKR CSV / Renta 4 .xls / JSON ledger) into a portfolio |
+| 12 | Import Transactions | Import a broker export (DEGIRO CSV / IBKR CSV / Renta 4 .xls / Horos CSV / JSON ledger) into a portfolio |
 | 13 | Delete Portfolio | Delete an existing portfolio |
 | 14 | Check Readiness | Verify env vars and Telegram connectivity |
 | 0 | Exit | Exit the program |
@@ -510,6 +510,9 @@ Typical flow:
      fund subscriptions/redemptions become buys/sells (units @ NAV). The export has no
      ISIN, so map the fund name to its Yahoo symbol once in `~/.pryces/symbol_map.json`
      (e.g. `"R4 MULTIGESTION NUMANTIA PATR. GLOBAL": "0P000168OI.F"`).
+   - **Horos** — Horos has no download, so paste its web "movimientos" table into a
+     semicolon CSV (`TIPO DE OPERACIÓN; PRODUCTO; VL; IMPORTE; FECHA`); units are derived
+     as `IMPORTE / VL`. The Horos fund auto-resolves by name on Yahoo (no mapping needed).
    - **JSON ledger** — a `{ "base_currency", "transactions" }` file, e.g. when
      migrating from another tool.
 
