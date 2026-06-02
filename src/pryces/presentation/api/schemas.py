@@ -5,7 +5,13 @@ from decimal import Decimal
 from pydantic import BaseModel
 
 from ...application.dtos import ImportResultDTO
-from ...domain.portfolio.portfolio import ManualAsset, Portfolio, PortfolioSummary, Position
+from ...domain.portfolio.portfolio import (
+    ClosedPosition,
+    ManualAsset,
+    Portfolio,
+    PortfolioSummary,
+    Position,
+)
 
 
 def _str(value: Decimal | None) -> str | None:
@@ -28,6 +34,7 @@ class PortfolioSummaryResponse(BaseModel):
 
 class PositionResponse(BaseModel):
     symbol: str
+    name: str | None = None
     quantity: str
     avg_cost: str
     price: str
@@ -35,6 +42,7 @@ class PositionResponse(BaseModel):
     value_base: str
     cost_base: str
     unrealized_pnl_base: str
+    realized_pnl_base: str
     total_return_pct: str
     broker: str | None = None
 
@@ -42,6 +50,7 @@ class PositionResponse(BaseModel):
     def from_position(cls, position: Position) -> PositionResponse:
         return cls(
             symbol=position.symbol,
+            name=position.name,
             quantity=str(position.quantity),
             avg_cost=str(position.avg_cost),
             price=str(position.price),
@@ -49,8 +58,33 @@ class PositionResponse(BaseModel):
             value_base=str(position.value_base),
             cost_base=str(position.cost_base),
             unrealized_pnl_base=str(position.unrealized_pnl_base),
+            realized_pnl_base=str(position.realized_pnl_base),
             total_return_pct=str(position.total_return_pct),
             broker=position.broker,
+        )
+
+
+class ClosedPositionResponse(BaseModel):
+    symbol: str
+    name: str | None = None
+    currency: str
+    realized_pnl_base: str
+    cost_basis_sold_base: str
+    realized_return_pct: str
+    hold_period_days: int | None = None
+    broker: str | None = None
+
+    @classmethod
+    def from_closed(cls, closed: ClosedPosition) -> ClosedPositionResponse:
+        return cls(
+            symbol=closed.symbol,
+            name=closed.name,
+            currency=closed.currency.value,
+            realized_pnl_base=str(closed.realized_pnl_base),
+            cost_basis_sold_base=str(closed.cost_basis_sold_base),
+            realized_return_pct=str(closed.realized_return_pct),
+            hold_period_days=closed.hold_period_days,
+            broker=closed.broker,
         )
 
 
@@ -68,11 +102,14 @@ class PortfolioResponse(BaseModel):
     base_currency: str
     positions: list[PositionResponse]
     manual_assets: list[ManualAssetResponse]
+    closed_positions: list[ClosedPositionResponse]
     positions_value: str
     manual_value: str
     total_value: str
     total_cost: str
     total_unrealized_pnl: str
+    total_realized_pnl: str
+    total_profit: str
     total_return_pct: str
     xirr_pct: str | None = None
     twr_pct: str | None = None
@@ -83,11 +120,16 @@ class PortfolioResponse(BaseModel):
             base_currency=portfolio.base_currency,
             positions=[PositionResponse.from_position(p) for p in portfolio.unified_positions],
             manual_assets=[ManualAssetResponse.from_asset(a) for a in portfolio.manual_assets],
+            closed_positions=[
+                ClosedPositionResponse.from_closed(c) for c in portfolio.closed_positions
+            ],
             positions_value=str(portfolio.positions_value),
             manual_value=str(portfolio.manual_value),
             total_value=str(portfolio.total_value),
             total_cost=str(portfolio.total_cost),
             total_unrealized_pnl=str(portfolio.total_unrealized_pnl),
+            total_realized_pnl=str(portfolio.total_realized_pnl),
+            total_profit=str(portfolio.total_profit),
             total_return_pct=str(portfolio.total_return_pct),
             xirr_pct=_str(portfolio.xirr_pct),
             twr_pct=_str(portfolio.twr_pct),

@@ -1,6 +1,7 @@
 import urllib.error
 
 from pryces.domain.portfolio.transactions import Instrument
+from pryces.domain.stocks import Currency
 from pryces.infrastructure.resolvers import (
     CachedSymbolResolver,
     JsonSymbolMap,
@@ -123,6 +124,53 @@ class TestYahooSymbolResolver:
         )
 
         assert result == "VUSA.AS"
+
+    def test_disambiguates_by_currency_when_no_exchange_hint(self):
+        # IBKR gives no exchange code; an AUD trade must pin the ASX listing
+        # rather than the US OTC cross-listing that search may surface first.
+        def search(query):
+            if query == "TTT":
+                return [
+                    _quote("TITMF", exchange="PNK"),
+                    _quote("TTT.AX", exchange="ASX"),
+                ]
+            return []
+
+        resolver = self._resolver(search)
+        result = resolver.resolve(
+            Instrument(symbol="TTT", name="TITOMIC LTD", currency=Currency.AUD)
+        )
+
+        assert result == "TTT.AX"
+
+    def test_currency_hint_ignored_for_eur_multi_venue(self):
+        # EUR spans many venues, so it gives no useful hint: first equity wins.
+        def search(query):
+            return [_quote("AAA.DE", exchange="GER"), _quote("AAA.AS", exchange="AMS")]
+
+        resolver = self._resolver(search)
+        result = resolver.resolve(
+            Instrument(symbol="AAA", name="SOME EURO CO", currency=Currency.EUR)
+        )
+
+        assert result == "AAA.DE"
+
+    def test_exchange_match_beats_currency_match(self):
+        def search(query):
+            return [_quote("FOO.AX", exchange="ASX"), _quote("FOO.MC", exchange="MCE")]
+
+        resolver = self._resolver(search)
+        result = resolver.resolve(
+            Instrument(
+                symbol="ES0000000001",
+                name="FOO",
+                exchange="MAD",
+                isin="ES0000000001",
+                currency=Currency.AUD,
+            )
+        )
+
+        assert result == "FOO.MC"
 
     def test_returns_first_equity_when_exchange_unmatched(self):
         def search(query):

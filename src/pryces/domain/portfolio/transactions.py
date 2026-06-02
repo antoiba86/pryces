@@ -47,12 +47,15 @@ class ImportWarning:
 class Instrument:
     # Carries the broker-provided identity of an instrument so a downstream
     # SymbolResolver can map it to a Yahoo ticker. `symbol` is whatever the
-    # importer stored on the Transaction (the ISIN for DEGIRO); `name` and
-    # `exchange` are best-effort resolution hints.
+    # importer stored on the Transaction (the ISIN for DEGIRO); `name`,
+    # `exchange`, and `currency` are best-effort resolution hints (currency
+    # disambiguates the listing when no exchange code is available, e.g. an
+    # AUD trade resolves to the ASX listing rather than a US OTC cross-listing).
     symbol: str
     name: str | None = None
     exchange: str | None = None
     isin: str | None = None
+    currency: Currency | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -19,6 +19,11 @@ class Position:
     dividends_base: Decimal
     fees_base: Decimal
     broker: str | None = None
+    # Realized P&L already booked on this still-open holding via partial sells
+    # (base currency, converted at each sell's own trade-date FX rate).
+    realized_pnl_base: Decimal = Decimal("0")
+    # Human-readable instrument name from the live quote (e.g. "Apple Inc.").
+    name: str | None = None
 
     @property
     def unrealized_pnl_base(self) -> Decimal:
@@ -27,6 +32,21 @@ class Position:
     @property
     def total_return_pct(self) -> Decimal:
         return total_return(self.value_base, self.cost_base, self.dividends_base, self.fees_base)
+
+
+@dataclass(frozen=True, slots=True)
+class ClosedPosition:
+    """A symbol fully sold out of the portfolio. Carries the realized result so
+    past performance stays visible after the holding leaves the open book."""
+
+    symbol: str
+    currency: Currency
+    realized_pnl_base: Decimal
+    cost_basis_sold_base: Decimal
+    realized_return_pct: Decimal
+    hold_period_days: int | None = None
+    broker: str | None = None
+    name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +61,7 @@ class Portfolio:
     base_currency: str
     positions: tuple[Position, ...] = field(default_factory=tuple)
     manual_assets: tuple[ManualAsset, ...] = field(default_factory=tuple)
+    closed_positions: tuple[ClosedPosition, ...] = field(default_factory=tuple)
     xirr_pct: Decimal | None = None
     twr_pct: Decimal | None = None
 
@@ -73,6 +94,20 @@ class Portfolio:
         return sum((p.unrealized_pnl_base for p in self.positions), Decimal("0"))
 
     @property
+    def total_realized_pnl(self) -> Decimal:
+        """Realized capital gains across closed positions and partial sells of
+        still-open positions."""
+        from_open = sum((p.realized_pnl_base for p in self.positions), Decimal("0"))
+        from_closed = sum((c.realized_pnl_base for c in self.closed_positions), Decimal("0"))
+        return from_open + from_closed
+
+    @property
+    def total_profit(self) -> Decimal:
+        """Lifetime profit: unrealized gains on current holdings + realized
+        capital gains + dividends received."""
+        return self.total_unrealized_pnl + self.total_realized_pnl + self.total_dividends
+
+    @property
     def total_return_pct(self) -> Decimal:
         return total_return(
             self.positions_value, self.total_cost, self.total_dividends, self.total_fees
@@ -92,11 +127,13 @@ class Portfolio:
 
     @property
     def unified_positions(self) -> tuple[Position, ...]:
-        """Per-symbol positions, collapsing all brokers into one entry.
+        """Per-symbol positions, collapsing the same symbol held at multiple
+        brokers into one entry.
 
-        Quantities and base-currency amounts sum directly; avg_cost and
-        price are weighted by quantity. The broker on the unified entries
-        is None, signalling "all brokers".
+        Quantities and base-currency amounts sum directly; avg_cost and price
+        are weighted by quantity. A symbol held at a single broker keeps that
+        broker; only a genuinely cross-broker merge clears it to None
+        (signalling "multiple brokers").
         """
         by_symbol: dict[str, list[Position]] = {}
         for position in self.positions:
@@ -104,7 +141,7 @@ class Portfolio:
         unified: list[Position] = []
         for symbol, group in by_symbol.items():
             if len(group) == 1:
-                unified.append(_with_broker(group[0], None))
+                unified.append(group[0])
                 continue
             unified.append(_merge_positions(symbol, group))
         return tuple(unified)
@@ -124,21 +161,6 @@ class PortfolioSummary:
     transaction_count: int
 
 
-def _with_broker(position: Position, broker: str | None) -> Position:
-    return Position(
-        symbol=position.symbol,
-        quantity=position.quantity,
-        avg_cost=position.avg_cost,
-        price=position.price,
-        currency=position.currency,
-        value_base=position.value_base,
-        cost_base=position.cost_base,
-        dividends_base=position.dividends_base,
-        fees_base=position.fees_base,
-        broker=broker,
-    )
-
-
 def _merge_positions(symbol: str, group: list[Position]) -> Position:
     total_quantity = sum((p.quantity for p in group), Decimal("0"))
     cost_native = sum((p.avg_cost * p.quantity for p in group), Decimal("0"))
@@ -156,4 +178,6 @@ def _merge_positions(symbol: str, group: list[Position]) -> Position:
         dividends_base=sum((p.dividends_base for p in group), Decimal("0")),
         fees_base=sum((p.fees_base for p in group), Decimal("0")),
         broker=None,
+        realized_pnl_base=sum((p.realized_pnl_base for p in group), Decimal("0")),
+        name=group[0].name,
     )

@@ -179,6 +179,7 @@ class DegiroCsvImporter(TransactionImporter):
                     name=merged.name or None,
                     exchange=merged.exchange or None,
                     isin=merged.isin,
+                    currency=merged.currency,
                 ),
             )
         return transactions, list(instruments.values())

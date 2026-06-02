@@ -334,3 +334,88 @@ class TestAggregateBySymbol:
         unified = aggregate_by_symbol(holdings)
         assert unified["AAPL"].quantity == Decimal("10")
         assert unified["AAPL"].avg_cost == Decimal("100")
+
+
+class TestRealizedSales:
+    def test_records_a_realized_sale_with_basis_and_proceeds(self):
+        holdings = replay(
+            [_buy(quantity="10", price="100", fee="0"), _sell(quantity="4", price="150", fee="0")]
+        )
+        holding = holdings[("AAPL", None)]
+
+        assert len(holding.realized_sales) == 1
+        sale = holding.realized_sales[0]
+        assert sale.quantity == Decimal("4")
+        assert sale.basis_native == Decimal("400")
+        assert sale.proceeds_native == Decimal("600")
+        assert sale.pnl_native == Decimal("200")
+        assert sale.date == date(2024, 6, 10)
+
+    def test_cost_basis_sold_sums_across_sales(self):
+        holdings = replay(
+            [
+                _buy(quantity="10", price="100", fee="0"),
+                _sell(quantity="4", price="150", fee="0", on=date(2024, 6, 10)),
+                _sell(quantity="6", price="120", fee="0", on=date(2024, 7, 1)),
+            ]
+        )
+        holding = holdings[("AAPL", None)]
+        assert holding.cost_basis_sold == Decimal("1000")
+
+    def test_tracks_first_buy_and_last_sell_dates(self):
+        holdings = replay(
+            [
+                _buy(quantity="10", price="100", fee="0", on=date(2024, 1, 10)),
+                _sell(quantity="4", price="150", fee="0", on=date(2024, 6, 10)),
+                _sell(quantity="6", price="120", fee="0", on=date(2024, 9, 1)),
+            ]
+        )
+        holding = holdings[("AAPL", None)]
+        assert holding.first_buy_date == date(2024, 1, 10)
+        assert holding.last_sell_date == date(2024, 9, 1)
+
+
+class TestClosedHoldings:
+    def test_fully_sold_holding_is_closed_not_active(self):
+        from pryces.domain.portfolio.holdings import closed_holdings
+
+        holdings = replay(
+            [_buy(quantity="10", price="100", fee="0"), _sell(quantity="10", price="150", fee="0")]
+        )
+
+        assert active_holdings(holdings) == {}
+        closed = closed_holdings(holdings)
+        assert ("AAPL", None) in closed
+        assert closed[("AAPL", None)].realized_pnl == Decimal("500")
+
+    def test_open_holding_is_not_closed(self):
+        from pryces.domain.portfolio.holdings import closed_holdings
+
+        holdings = replay(
+            [_buy(quantity="10", price="100", fee="0"), _sell(quantity="4", price="150", fee="0")]
+        )
+
+        assert closed_holdings(holdings) == {}
+        assert ("AAPL", None) in active_holdings(holdings)
+
+    def test_never_sold_holding_is_not_closed(self):
+        from pryces.domain.portfolio.holdings import closed_holdings
+
+        holdings = replay([_buy(quantity="10", price="100", fee="0")])
+        assert closed_holdings(holdings) == {}
+
+
+class TestAggregateMergesRealized:
+    def test_aggregate_merges_realized_sales_and_first_buy_date(self):
+        holdings = replay(
+            [
+                _buy(broker="IBKR", quantity="10", price="100", fee="0", on=date(2024, 1, 1)),
+                _sell(broker="IBKR", quantity="10", price="150", fee="0", on=date(2024, 6, 1)),
+                _buy(broker="DEGIRO", quantity="5", price="80", fee="0", on=date(2023, 12, 1)),
+                _sell(broker="DEGIRO", quantity="5", price="90", fee="0", on=date(2024, 5, 1)),
+            ]
+        )
+        unified = aggregate_by_symbol(holdings)["AAPL"]
+        assert len(unified.realized_sales) == 2
+        assert unified.first_buy_date == date(2023, 12, 1)
+        assert unified.cost_basis_sold == Decimal("1400")

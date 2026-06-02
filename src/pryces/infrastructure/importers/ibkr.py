@@ -116,7 +116,11 @@ class IbkrActivityImporter(TransactionImporter):
         transactions.append(transaction)
         instruments.setdefault(
             symbol,
-            Instrument(symbol=symbol, name=fields.get("Description", "").strip() or None),
+            Instrument(
+                symbol=symbol,
+                name=fields.get("Description", "").strip() or None,
+                currency=transaction.currency,
+            ),
         )
 
     @staticmethod

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ..application.interfaces import LoggerFactory, SymbolResolver
 from ..domain.portfolio.transactions import Instrument
+from ..domain.stocks import Currency
 from .repositories import resolve_data_dir
 
 SYMBOL_MAP_FILENAME = "symbol_map.json"
@@ -33,6 +34,20 @@ _EXCHANGE_ALIASES: dict[str, set[str]] = {
     "LSE": {"LSE"},
     "MIL": {"MIL"},
     "SWX": {"EBS"},
+}
+
+# Trade currency → the Yahoo `exchange` codes for that currency's home market(s),
+# used to disambiguate when no exchange code is available (e.g. IBKR rows). A
+# single-venue currency like AUD pins the ASX listing over a US OTC cross-listing.
+# EUR is intentionally omitted: it spans many venues, so it gives no useful hint.
+_CURRENCY_EXCHANGES: dict[Currency, set[str]] = {
+    Currency.AUD: {"ASX"},
+    Currency.GBP: {"LSE"},
+    Currency.CAD: {"TOR"},
+    Currency.HKD: {"HKG"},
+    Currency.JPY: {"JPX", "TYO"},
+    Currency.KRW: {"KSC", "KOE"},
+    Currency.USD: {"NMS", "NGM", "NCM", "NYQ", "PCX", "ASE", "BTS", "NAS"},
 }
 
 # Trailing share-class / currency tokens that make a broker product name too
@@ -131,26 +146,38 @@ class YahooSymbolResolver(SymbolResolver):
         # if no query yields an exchange match do we fall back to the first
         # equity seen.
         fallback: str | None = None
-        for query in self._queries(isin, instrument.name):
+        by_currency: str | None = None
+        for query in self._queries(isin, instrument.symbol, instrument.name):
             equities = self._equities(query)
             if not equities:
                 continue
             matched = self._match_exchange(equities, instrument.exchange)
             if matched is not None:
                 return matched.get("symbol")
+            if by_currency is None:
+                currency_match = self._match_currency(equities, instrument.currency)
+                if currency_match is not None:
+                    by_currency = currency_match.get("symbol")
             if fallback is None:
                 fallback = equities[0].get("symbol")
-        if fallback is not None:
-            return fallback
+        # Exchange match wins; a currency-home-market match is the next-best
+        # signal (pins e.g. an AUD trade to ASX); first equity is the last resort.
+        resolved = by_currency or fallback
+        if resolved is not None:
+            return resolved
         self._logger.warning(f"Could not resolve a Yahoo symbol for {isin or instrument.symbol}")
         return None
 
     @staticmethod
-    def _queries(isin: str | None, name: str | None) -> list[str]:
-        # Broker product names are verbose ("... UCITS ETF USD DIS"), which is
-        # too specific for Yahoo's name search; a trimmed variant surfaces the
-        # full set of cross-listings so exchange disambiguation can work.
-        queries = [isin, name, _trimmed_name(name)]
+    def _queries(isin: str | None, symbol: str | None, name: str | None) -> list[str]:
+        # Order matters (first hit wins on ties): ISIN is most precise; the raw
+        # broker symbol is next (IBKR gives the real exchange ticker, e.g. "TTT",
+        # which surfaces the home-market listing that a verbose name search
+        # misses); then the product name and a trimmed variant of it (broker
+        # names like "... UCITS ETF USD DIS" are too specific, so trimming the
+        # trailing share-class/currency tokens broadens the cross-listing set).
+        symbol_query = symbol if symbol and not _is_isin(symbol) else None
+        queries = [isin, symbol_query, name, _trimmed_name(name)]
         return list(dict.fromkeys(value for value in queries if value))
 
     def _equities(self, query: str) -> list[dict]:
@@ -170,6 +197,18 @@ class YahooSymbolResolver(SymbolResolver):
         if not exchange:
             return None
         allowed = _EXCHANGE_ALIASES.get(exchange.strip().upper())
+        if not allowed:
+            return None
+        for quote in equities:
+            if quote.get("exchange", "").upper() in allowed:
+                return quote
+        return None
+
+    @staticmethod
+    def _match_currency(equities: list[dict], currency: Currency | None) -> dict | None:
+        if currency is None:
+            return None
+        allowed = _CURRENCY_EXCHANGES.get(currency)
         if not allowed:
             return None
         for quote in equities:

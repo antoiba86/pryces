@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from pryces.domain.portfolio.transactions import Transaction, TransactionType
@@ -16,6 +18,22 @@ class CurrencyMismatchError(ValueError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class RealizedSale:
+    """A single sell event, recorded so realized P&L can be converted to the
+    base currency at the FX rate of its own trade date (not today's rate)."""
+
+    date: date | None
+    quantity: Decimal
+    basis_native: Decimal
+    proceeds_native: Decimal
+    currency: Currency
+
+    @property
+    def pnl_native(self) -> Decimal:
+        return self.proceeds_native - self.basis_native
+
+
 class Holding:
     __slots__ = (
         "_symbol",
@@ -26,6 +44,8 @@ class Holding:
         "_realized_pnl",
         "_dividends",
         "_fees",
+        "_realized_sales",
+        "_first_buy_date",
     )
 
     def __init__(self, symbol: str, currency: Currency, broker: str | None = None) -> None:
@@ -37,6 +57,8 @@ class Holding:
         self._realized_pnl = Decimal("0")
         self._dividends = Decimal("0")
         self._fees = Decimal("0")
+        self._realized_sales: list[RealizedSale] = []
+        self._first_buy_date: date | None = None
 
     @property
     def symbol(self) -> str:
@@ -76,17 +98,49 @@ class Holding:
             return Decimal("0")
         return self._cost_total / self._quantity
 
-    def apply_buy(self, quantity: Decimal, price: Decimal, fee: Decimal) -> None:
+    @property
+    def realized_sales(self) -> tuple[RealizedSale, ...]:
+        return tuple(self._realized_sales)
+
+    @property
+    def first_buy_date(self) -> date | None:
+        return self._first_buy_date
+
+    @property
+    def last_sell_date(self) -> date | None:
+        dates = [sale.date for sale in self._realized_sales if sale.date is not None]
+        return max(dates) if dates else None
+
+    @property
+    def cost_basis_sold(self) -> Decimal:
+        return sum((sale.basis_native for sale in self._realized_sales), Decimal("0"))
+
+    def apply_buy(
+        self, quantity: Decimal, price: Decimal, fee: Decimal, on: date | None = None
+    ) -> None:
+        if self._first_buy_date is None and on is not None:
+            self._first_buy_date = on
         self._quantity += quantity
         self._cost_total += quantity * price + fee
         self._fees += fee
 
-    def apply_sell(self, quantity: Decimal, price: Decimal, fee: Decimal) -> None:
+    def apply_sell(
+        self, quantity: Decimal, price: Decimal, fee: Decimal, on: date | None = None
+    ) -> None:
         if quantity > self._quantity:
             raise OversoldError(f"Selling {quantity} {self._symbol} but only {self._quantity} held")
         basis_removed = self.avg_cost * quantity
         proceeds = quantity * price - fee
         self._realized_pnl += proceeds - basis_removed
+        self._realized_sales.append(
+            RealizedSale(
+                date=on,
+                quantity=quantity,
+                basis_native=basis_removed,
+                proceeds_native=proceeds,
+                currency=self._currency,
+            )
+        )
         self._quantity -= quantity
         self._cost_total -= basis_removed
         self._fees += fee
@@ -119,6 +173,15 @@ def active_holdings(holdings: dict[HoldingKey, Holding]) -> dict[HoldingKey, Hol
     return {key: holding for key, holding in holdings.items() if holding.quantity > 0}
 
 
+def closed_holdings(holdings: dict[HoldingKey, Holding]) -> dict[HoldingKey, Holding]:
+    """Holdings fully sold out (no open quantity) that booked realized P&L."""
+    return {
+        key: holding
+        for key, holding in holdings.items()
+        if holding.quantity <= 0 and holding.realized_sales
+    }
+
+
 def aggregate_by_symbol(holdings: dict[HoldingKey, Holding]) -> dict[str, Holding]:
     """Collapse broker-keyed holdings into a single per-symbol view.
 
@@ -148,15 +211,25 @@ def _absorb(target: Holding, source: Holding) -> None:
     target._realized_pnl += source.realized_pnl
     target._dividends += source.dividends
     target._fees += source.fees
+    target._realized_sales.extend(source.realized_sales)
+    source_first = source.first_buy_date
+    if source_first is not None and (
+        target._first_buy_date is None or source_first < target._first_buy_date
+    ):
+        target._first_buy_date = source_first
 
 
 def _apply(holding: Holding, transaction: Transaction) -> None:
     if transaction.type == TransactionType.BUY:
         assert transaction.quantity is not None and transaction.price is not None
-        holding.apply_buy(transaction.quantity, transaction.price, transaction.fee)
+        holding.apply_buy(
+            transaction.quantity, transaction.price, transaction.fee, transaction.date
+        )
     elif transaction.type == TransactionType.SELL:
         assert transaction.quantity is not None and transaction.price is not None
-        holding.apply_sell(transaction.quantity, transaction.price, transaction.fee)
+        holding.apply_sell(
+            transaction.quantity, transaction.price, transaction.fee, transaction.date
+        )
     elif transaction.type == TransactionType.DIVIDEND:
         assert transaction.amount is not None
         holding.apply_dividend(transaction.amount)

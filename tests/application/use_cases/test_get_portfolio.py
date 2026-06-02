@@ -359,3 +359,99 @@ class TestGetPortfolioTwr:
         result = self._use_case(prices).handle(GetPortfolioRequest(name="main"))
 
         assert result.twr_pct is None
+
+
+def _sell(
+    symbol: str,
+    quantity: str,
+    price: str,
+    currency: Currency,
+    fee: str = "0",
+    broker: str | None = None,
+    when: date = date(2024, 6, 1),
+) -> Transaction:
+    return Transaction(
+        date=when,
+        type=TransactionType.SELL,
+        symbol=symbol,
+        currency=currency,
+        quantity=Decimal(quantity),
+        price=Decimal(price),
+        fee=Decimal(fee),
+        broker=broker,
+    )
+
+
+class TestGetPortfolioRealized:
+    def setup_method(self):
+        self.repo = Mock(spec=PortfolioRepository)
+        self.stock = Mock(spec=StockProvider)
+        self.fx = Mock(spec=FxRateProvider)
+        self.repo.get_manual_assets.return_value = []
+
+    def _use_case(self, historical):
+        return GetPortfolio(
+            repository=self.repo,
+            stock_provider=self.stock,
+            fx_provider=self.fx,
+            historical_fx_provider=historical,
+            clock=lambda: date(2025, 1, 1),
+        )
+
+    def test_fully_sold_position_appears_as_closed(self):
+        self.repo.find_summary_by_name.return_value = _summary(base="EUR")
+        self.repo.get_transactions.return_value = [
+            _buy("AAPL", "10", "100", Currency.USD, when=date(2024, 1, 1)),
+            _sell("AAPL", "10", "150", Currency.USD, when=date(2024, 6, 1)),
+        ]
+        # current spot unused (nothing open); historical sell-date rate = 0.9 EUR/USD
+        self.fx.get_rates.return_value = {}
+        # name is fetched even for sold-out positions
+        self.stock.get_stocks.return_value = [
+            Stock(symbol="AAPL", current_price=Decimal("0"), name="Apple Inc.")
+        ]
+        historical = _FakeHistoricalFx(
+            {
+                (Currency.USD, date(2024, 1, 1)): Decimal("1.0"),
+                (Currency.USD, date(2024, 6, 1)): Decimal("0.9"),
+            }
+        )
+
+        result = self._use_case(historical).handle(GetPortfolioRequest(name="main"))
+
+        assert result.positions == ()
+        assert len(result.closed_positions) == 1
+        closed = result.closed_positions[0]
+        assert closed.symbol == "AAPL"
+        assert closed.name == "Apple Inc."
+        # realized native = 500 USD, converted at sell-date 0.9 -> 450 EUR
+        assert closed.realized_pnl_base == Decimal("450.0")
+        # return % is native (FX-neutral): 500 / 1000 -> 50%
+        assert closed.realized_return_pct == Decimal("50")
+        assert closed.hold_period_days == (date(2024, 6, 1) - date(2024, 1, 1)).days
+        assert result.total_realized_pnl == Decimal("450.0")
+
+    def test_partial_sell_keeps_position_open_with_realized(self):
+        self.repo.find_summary_by_name.return_value = _summary(base="EUR")
+        self.repo.get_transactions.return_value = [
+            _buy("AAPL", "10", "100", Currency.USD, when=date(2024, 1, 1)),
+            _sell("AAPL", "4", "150", Currency.USD, when=date(2024, 6, 1)),
+        ]
+        self.stock.get_stocks.return_value = [
+            Stock(symbol="AAPL", current_price=Decimal("160"), name="Apple Inc.")
+        ]
+        self.fx.get_rates.return_value = {Currency.USD: Decimal("1")}
+        historical = _FakeHistoricalFx(
+            {
+                (Currency.USD, date(2024, 1, 1)): Decimal("1.0"),
+                (Currency.USD, date(2024, 6, 1)): Decimal("1.0"),
+            }
+        )
+
+        result = self._use_case(historical).handle(GetPortfolioRequest(name="main"))
+
+        assert len(result.positions) == 1
+        assert result.closed_positions == ()
+        assert result.positions[0].name == "Apple Inc."
+        # realized native = 4*150 - 4*100 = 200, at rate 1.0 -> 200
+        assert result.positions[0].realized_pnl_base == Decimal("200.0")

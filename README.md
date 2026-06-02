@@ -260,7 +260,7 @@ uvicorn pryces.presentation.api.main:app --port 8000
 | GET | `/health` | Liveness check |
 | GET | `/portfolios` | List portfolios |
 | POST | `/portfolios` | Create a portfolio (`{"base_currency": "EUR", "name": "main"}`) |
-| GET | `/portfolios/{name}` | Portfolio with live prices, totals, XIRR, and TWR |
+| GET | `/portfolios/{name}` | Portfolio with live prices, open + closed positions, totals (incl. realized P&L and total profit), XIRR, and TWR |
 | DELETE | `/portfolios/{name}` | Delete a portfolio |
 | POST | `/portfolios/{name}/transactions` | Import a broker export (`multipart/form-data` file, optional `?broker=`) |
 
@@ -514,10 +514,21 @@ Typical flow:
    FX rate — TWR additionally revalues the holdings at each cashflow date using
    historical prices), and can optionally send the same report to Telegram.
 
-**Symbol resolution.** Broker exports identify instruments by ISIN, not by Yahoo
-ticker. On import, Pryces resolves each ISIN to a Yahoo symbol (ISIN/name search,
-disambiguated by the listing exchange) and caches the mapping in a user-editable
-file at `~/.pryces/symbol_map.json`. If a guess is wrong (or an instrument can't be
+   **Realized gains.** Positions you've fully sold out of don't disappear: the API's
+   `GET /portfolios/{name}` returns them as `closed_positions` (symbol, hold period,
+   realized P&L, and ROI %), and still-open positions carry the realized P&L already
+   booked via partial sells (`realized_pnl_base`). Realized P&L is converted to the base
+   currency at each sale's **own trade-date** FX rate (the ROI % itself is computed in
+   the trade currency so exchange-rate moves don't distort it). The portfolio totals add
+   `total_realized_pnl` and `total_profit` (unrealized + realized + dividends).
+
+**Symbol resolution.** Broker exports identify instruments by ISIN or a raw ticker,
+not always by Yahoo symbol. On import, Pryces resolves each instrument to a Yahoo
+symbol (searching by ISIN, the broker ticker, and the product name) and disambiguates
+the listing first by the broker's exchange code, then — when none is given (e.g. IBKR
+rows) — by the **trade currency's home market** (an AUD trade resolves to the ASX
+listing, not a US OTC cross-listing). The mapping is cached in a user-editable file at
+`~/.pryces/symbol_map.json`. If a guess is wrong (or an instrument can't be
 resolved — it's reported under "unresolved symbols"), edit that file: add or correct
 the `"<ISIN>": "<TICKER>"` entry and the next import/show picks it up.
 

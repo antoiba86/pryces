@@ -66,6 +66,38 @@ def _ledger(symbol="AAPL", raw_id="t1"):
     )
 
 
+def _closed_ledger():
+    return json.dumps(
+        {
+            "base_currency": "EUR",
+            "transactions": [
+                {
+                    "date": "2024-01-10",
+                    "type": "buy",
+                    "symbol": "AAPL",
+                    "currency": "USD",
+                    "quantity": "10",
+                    "price": "100.00",
+                    "fee": "0",
+                    "broker": "TEST",
+                    "raw_id": "b1",
+                },
+                {
+                    "date": "2024-06-10",
+                    "type": "sell",
+                    "symbol": "AAPL",
+                    "currency": "USD",
+                    "quantity": "10",
+                    "price": "150.00",
+                    "fee": "0",
+                    "broker": "TEST",
+                    "raw_id": "s1",
+                },
+            ],
+        }
+    )
+
+
 @pytest.fixture()
 def client(tmp_path):
     app = create_app()
@@ -131,6 +163,23 @@ class TestPortfoliosApi:
         portfolio = client.get("/portfolios/main").json()
         assert portfolio["base_currency"] == "EUR"
         assert [p["symbol"] for p in portfolio["positions"]] == ["AAPL"]
+
+    def test_get_shows_closed_position_and_totals(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        assert _upload(client, "main", _closed_ledger()).status_code == 200
+
+        portfolio = client.get("/portfolios/main").json()
+
+        assert portfolio["positions"] == []
+        assert [c["symbol"] for c in portfolio["closed_positions"]] == ["AAPL"]
+        closed = portfolio["closed_positions"][0]
+        # realized native = 500 USD at fake rate 1.0 -> 500; return % = 50
+        assert Decimal(closed["realized_pnl_base"]) == Decimal("500")
+        assert Decimal(closed["realized_return_pct"]) == Decimal("50")
+        assert closed["hold_period_days"] == 152
+        assert Decimal(portfolio["total_realized_pnl"]) == Decimal("500")
+        # nothing open: total_profit == realized (unrealized 0, dividends 0)
+        assert Decimal(portfolio["total_profit"]) == Decimal("500")
 
     def test_reimport_dedupes(self, client):
         client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})

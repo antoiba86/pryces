@@ -156,7 +156,7 @@ class TestPositionBroker:
 
 
 class TestUnifiedPositions:
-    def test_single_broker_position_passes_through_with_broker_cleared(self):
+    def test_single_broker_position_keeps_its_broker(self):
         portfolio = Portfolio(
             base_currency="EUR",
             positions=(_position(symbol="AAPL", broker="IBKR"),),
@@ -164,7 +164,7 @@ class TestUnifiedPositions:
         unified = portfolio.unified_positions
         assert len(unified) == 1
         assert unified[0].symbol == "AAPL"
-        assert unified[0].broker is None
+        assert unified[0].broker == "IBKR"
 
     def test_collapses_same_symbol_across_brokers(self):
         portfolio = Portfolio(
@@ -194,7 +194,7 @@ class TestUnifiedPositions:
         assert len(unified) == 1
         aapl = unified[0]
         assert aapl.symbol == "AAPL"
-        assert aapl.broker is None
+        assert aapl.broker is None  # cross-broker merge clears the broker
         assert aapl.quantity == Decimal("15")
         # Weighted avg cost: (10*100 + 5*200) / 15 = 133.33
         assert aapl.avg_cost.quantize(Decimal("0.01")) == Decimal("133.33")
@@ -256,3 +256,104 @@ class TestPortfolioSummary:
         summary = PortfolioSummary(name="main", base_currency="EUR", transaction_count=42)
         with pytest.raises(Exception):
             summary.name = "other"
+
+
+def _closed(
+    symbol="AAPL",
+    realized="200",
+    basis="400",
+    return_pct="50",
+    hold_days=120,
+    broker=None,
+):
+    from pryces.domain.portfolio.portfolio import ClosedPosition
+
+    return ClosedPosition(
+        symbol=symbol,
+        currency=Currency.USD,
+        realized_pnl_base=Decimal(realized),
+        cost_basis_sold_base=Decimal(basis),
+        realized_return_pct=Decimal(return_pct),
+        hold_period_days=hold_days,
+        broker=broker,
+    )
+
+
+class TestRealizedAndProfit:
+    def test_total_realized_sums_open_and_closed(self):
+        portfolio = Portfolio(
+            base_currency="EUR",
+            positions=(_position(value="1100", cost="1000"),),
+            closed_positions=(_closed(realized="200"),),
+        )
+        # open position default realized_pnl_base is 0
+        assert portfolio.total_realized_pnl == Decimal("200")
+
+    def test_total_realized_includes_partial_sells_on_open_positions(self):
+        position = Position(
+            symbol="AAPL",
+            quantity=Decimal("6"),
+            avg_cost=Decimal("100"),
+            price=Decimal("110"),
+            currency=Currency.USD,
+            value_base=Decimal("660"),
+            cost_base=Decimal("600"),
+            dividends_base=Decimal("0"),
+            fees_base=Decimal("0"),
+            realized_pnl_base=Decimal("150"),
+        )
+        portfolio = Portfolio(base_currency="EUR", positions=(position,))
+        assert portfolio.total_realized_pnl == Decimal("150")
+
+    def test_total_profit_combines_unrealized_realized_dividends(self):
+        position = Position(
+            symbol="AAPL",
+            quantity=Decimal("10"),
+            avg_cost=Decimal("100"),
+            price=Decimal("110"),
+            currency=Currency.USD,
+            value_base=Decimal("1100"),
+            cost_base=Decimal("1000"),
+            dividends_base=Decimal("30"),
+            fees_base=Decimal("0"),
+            realized_pnl_base=Decimal("0"),
+        )
+        portfolio = Portfolio(
+            base_currency="EUR",
+            positions=(position,),
+            closed_positions=(_closed(realized="200"),),
+        )
+        # unrealized 100 + realized 200 + dividends 30
+        assert portfolio.total_profit == Decimal("330")
+
+    def test_merged_positions_sum_realized(self):
+        a = Position(
+            symbol="AAPL",
+            quantity=Decimal("5"),
+            avg_cost=Decimal("100"),
+            price=Decimal("110"),
+            currency=Currency.USD,
+            value_base=Decimal("550"),
+            cost_base=Decimal("500"),
+            dividends_base=Decimal("0"),
+            fees_base=Decimal("0"),
+            broker="IBKR",
+            realized_pnl_base=Decimal("40"),
+        )
+        b = Position(
+            symbol="AAPL",
+            quantity=Decimal("5"),
+            avg_cost=Decimal("100"),
+            price=Decimal("110"),
+            currency=Currency.USD,
+            value_base=Decimal("550"),
+            cost_base=Decimal("500"),
+            dividends_base=Decimal("0"),
+            fees_base=Decimal("0"),
+            broker="DEGIRO",
+            realized_pnl_base=Decimal("60"),
+        )
+        portfolio = Portfolio(base_currency="EUR", positions=(a, b))
+        unified = portfolio.unified_positions
+        assert len(unified) == 1
+        assert unified[0].realized_pnl_base == Decimal("100")

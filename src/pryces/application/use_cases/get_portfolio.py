@@ -4,8 +4,14 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from ...domain.portfolio.holdings import Holding, HoldingKey, active_holdings, replay
-from ...domain.portfolio.portfolio import Portfolio, Position
+from ...domain.portfolio.holdings import (
+    Holding,
+    HoldingKey,
+    active_holdings,
+    closed_holdings,
+    replay,
+)
+from ...domain.portfolio.portfolio import ClosedPosition, Portfolio, Position
 from ...domain.portfolio.returns import XirrConvergenceError, build_xirr_cashflows, twr, xirr
 from ...domain.portfolio.transactions import Transaction
 from ...domain.stocks import Currency
@@ -64,21 +70,46 @@ class GetPortfolio:
         manual_assets = self._repository.get_manual_assets(request.name, user_id=request.user_id)
         base_currency = Currency(summary.base_currency)
 
-        holdings = active_holdings(replay(transactions))
-        if not holdings:
+        all_holdings = replay(transactions)
+        active = active_holdings(all_holdings)
+        closed = closed_holdings(all_holdings)
+        if not active and not closed:
             return Portfolio(
                 base_currency=summary.base_currency,
                 manual_assets=tuple(manual_assets),
             )
 
-        symbols = list({holding.symbol for holding in holdings.values()})
-        stocks = {stock.symbol: stock for stock in self._stock_provider.get_stocks(symbols)}
+        # Date-accurate FX rates for every non-base transaction date, used both
+        # for XIRR and to convert realized P&L at each sell's own trade date.
+        historical_rates = (
+            self._gather_rates(transactions, base_currency) if self._historical_fx else {}
+        )
 
-        quote_currencies = list({holding.currency for holding in holdings.values()})
-        rates = self._fx_provider.get_rates(base_currency, quote_currencies)
+        quote_currencies = list({holding.currency for holding in active.values()})
+        rates = (
+            self._fx_provider.get_rates(base_currency, quote_currencies) if quote_currencies else {}
+        )
+
+        def rate_at(currency: Currency, on: date | None) -> Decimal | None:
+            if currency == base_currency:
+                return Decimal("1")
+            historical = historical_rates.get((currency, on)) if on is not None else None
+            return historical if historical is not None else rates.get(currency)
+
+        # Fetch quotes for open AND closed symbols — closed positions need only
+        # the instrument name (price is irrelevant once sold).
+        symbols = list(
+            {holding.symbol for holding in active.values()}
+            | {holding.symbol for holding in closed.values()}
+        )
+        stocks = (
+            {stock.symbol: stock for stock in self._stock_provider.get_stocks(symbols)}
+            if symbols
+            else {}
+        )
 
         positions: list[Position] = []
-        for holding in holdings.values():
+        for holding in active.values():
             stock = stocks.get(holding.symbol.upper())
             if stock is None:
                 continue
@@ -98,15 +129,70 @@ class GetPortfolio:
                     dividends_base=holding.dividends * rate,
                     fees_base=holding.fees * rate,
                     broker=holding.broker,
+                    realized_pnl_base=self._realized_base(holding, rate_at),
+                    name=stock.name,
                 )
             )
+
+        closed_positions = [
+            self._build_closed(holding, rate_at, stocks) for holding in closed.values()
+        ]
 
         return Portfolio(
             base_currency=summary.base_currency,
             positions=tuple(positions),
             manual_assets=tuple(manual_assets),
-            xirr_pct=self._compute_xirr(transactions, base_currency, positions),
+            closed_positions=tuple(closed_positions),
+            xirr_pct=self._compute_xirr(transactions, base_currency, positions, historical_rates),
             twr_pct=self._compute_twr(transactions, base_currency, positions),
+        )
+
+    def _realized_base(
+        self,
+        holding: Holding,
+        rate_at: Callable[[Currency, date | None], Decimal | None],
+    ) -> Decimal:
+        total = Decimal("0")
+        for sale in holding.realized_sales:
+            rate = rate_at(sale.currency, sale.date)
+            if rate is not None:
+                total += sale.pnl_native * rate
+        return total
+
+    def _build_closed(
+        self,
+        holding: Holding,
+        rate_at: Callable[[Currency, date | None], Decimal | None],
+        stocks: dict,
+    ) -> ClosedPosition:
+        realized_base = Decimal("0")
+        basis_base = Decimal("0")
+        for sale in holding.realized_sales:
+            rate = rate_at(sale.currency, sale.date)
+            if rate is None:
+                continue
+            realized_base += sale.pnl_native * rate
+            basis_base += sale.basis_native * rate
+
+        # Return % is computed in native currency so FX moves don't distort it.
+        realized_native = sum((sale.pnl_native for sale in holding.realized_sales), Decimal("0"))
+        basis_native = holding.cost_basis_sold
+        return_pct = realized_native / basis_native * 100 if basis_native > 0 else Decimal("0")
+
+        first_buy = holding.first_buy_date
+        last_sell = holding.last_sell_date
+        hold_days = (last_sell - first_buy).days if first_buy and last_sell else None
+
+        stock = stocks.get(holding.symbol.upper())
+        return ClosedPosition(
+            symbol=holding.symbol,
+            currency=holding.currency,
+            realized_pnl_base=realized_base,
+            cost_basis_sold_base=basis_base,
+            realized_return_pct=return_pct,
+            hold_period_days=hold_days,
+            broker=holding.broker,
+            name=stock.name if stock is not None else None,
         )
 
     def _compute_xirr(
@@ -114,17 +200,17 @@ class GetPortfolio:
         transactions: list[Transaction],
         base_currency: Currency,
         positions: list[Position],
+        historical_rates: dict[tuple[Currency, date], Decimal],
     ) -> Decimal | None:
         if self._historical_fx is None or not transactions:
             return None
 
-        rates = self._gather_rates(transactions, base_currency)
         terminal_value = sum((position.value_base for position in positions), Decimal("0"))
 
         def convert(on: date, currency: Currency, amount: Decimal) -> Decimal:
             if currency == base_currency:
                 return amount
-            rate = rates.get((currency, on))
+            rate = historical_rates.get((currency, on))
             if rate is None:
                 raise _MissingRate()
             return amount * rate
