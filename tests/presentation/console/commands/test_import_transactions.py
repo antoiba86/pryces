@@ -86,7 +86,7 @@ class TestImportTransactionsCommand:
         request = import_use_case.handle.call_args.args[0]
         assert request.portfolio_name == "main"
         assert request.broker == "degiro"
-        assert request.content == "data"
+        assert request.content == b"data"
         assert "inserted: 4" in result.message
         assert "duplicates skipped: 1" in result.message
         assert "ES0105618005" in result.message

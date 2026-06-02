@@ -110,7 +110,7 @@ async def import_transactions(
     import_use_case: ImportTransactions = Depends(get_import_transactions),
     user_id: int = Depends(current_user_id),
 ) -> ImportResultResponse:
-    content = (await file.read()).decode("utf-8")
+    content = await file.read()
     try:
         result = import_use_case.handle(
             ImportTransactionsRequest(

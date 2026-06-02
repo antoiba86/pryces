@@ -18,7 +18,9 @@ SYMBOL_MAP_FILENAME = "symbol_map.json"
 _SEARCH_URL = "https://query2.finance.yahoo.com/v1/finance/search"
 _USER_AGENT = "Mozilla/5.0 (compatible; pryces/1.0)"
 _ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
-_EQUITY_QUOTE_TYPES = {"EQUITY", "ETF"}
+# Yahoo quoteTypes we treat as resolvable holdings: shares, ETFs, and mutual funds
+# (funds price by NAV exactly like a stock position).
+_RESOLVABLE_QUOTE_TYPES = {"EQUITY", "ETF", "MUTUALFUND"}
 
 # DEGIRO reference-exchange code → the Yahoo `exchange` codes that represent the
 # same venue, used to disambiguate when a name/ISIN search returns several
@@ -189,7 +191,7 @@ class YahooSymbolResolver(SymbolResolver):
         return [
             quote
             for quote in candidates
-            if quote.get("quoteType", "").upper() in _EQUITY_QUOTE_TYPES and quote.get("symbol")
+            if quote.get("quoteType", "").upper() in _RESOLVABLE_QUOTE_TYPES and quote.get("symbol")
         ]
 
     @staticmethod

@@ -11,6 +11,7 @@ from ...infrastructure.fx import YahooFinanceFxProvider, YahooFinanceHistoricalF
 from ...infrastructure.importers.degiro import DegiroCsvImporter
 from ...infrastructure.importers.ibkr import IbkrActivityImporter
 from ...infrastructure.importers.json_ledger import JsonLedgerImporter
+from ...infrastructure.importers.renta4 import Renta4FundsImporter
 from ...infrastructure.logging import PythonLoggerFactory, setup_logging
 from ...infrastructure.portfolio_formatters import TelegramPortfolioFormatter
 from ...infrastructure.providers import YahooFinanceHistoricalPriceProvider, YahooFinanceProvider
@@ -40,7 +41,13 @@ def _create_menu(logger_factory: LoggerFactory) -> InteractiveMenu:
         YahooSymbolResolver(logger_factory), JsonSymbolMap(), logger_factory
     )
     importer_registry = ImporterRegistry(
-        [DegiroCsvImporter(), JsonLedgerImporter(), IbkrActivityImporter()], logger_factory
+        [
+            DegiroCsvImporter(),
+            JsonLedgerImporter(),
+            IbkrActivityImporter(),
+            Renta4FundsImporter(),
+        ],
+        logger_factory,
     )
 
     factory = CommandFactory(

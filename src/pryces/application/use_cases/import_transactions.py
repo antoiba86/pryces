@@ -12,7 +12,7 @@ from ..interfaces import PortfolioRepository, SymbolResolver
 @dataclass(frozen=True)
 class ImportTransactionsRequest:
     portfolio_name: str
-    content: str
+    content: bytes
     broker: str | None = None
     user_id: int = 1
 

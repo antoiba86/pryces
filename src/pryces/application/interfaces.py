@@ -37,12 +37,14 @@ class TransactionImporter(ABC):
         pass
 
     @abstractmethod
-    def can_parse(self, content: str) -> bool:
+    def can_parse(self, content: bytes) -> bool:
         # Fast shape/header sniff used for auto-detection. No I/O, no exceptions.
+        # Receives the raw file bytes; text importers decode internally so binary
+        # formats (e.g. .xls) are first-class.
         pass
 
     @abstractmethod
-    def parse(self, content: str) -> ImportResult:
+    def parse(self, content: bytes) -> ImportResult:
         # Returns parsed transactions plus non-fatal warnings. Raises
         # UnrecognizedImportFormat only when the content is structurally
         # unrecognized (e.g. parse() called on content can_parse() rejected).

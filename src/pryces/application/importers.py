@@ -25,7 +25,7 @@ class ImporterRegistry:
     def importers(self) -> list[TransactionImporter]:
         return list(self._importers)
 
-    def auto_detect(self, content: str) -> TransactionImporter | None:
+    def auto_detect(self, content: bytes) -> TransactionImporter | None:
         for importer in self._importers:
             if importer.can_parse(content):
                 self._logger.info(f"Auto-detected importer: {importer.broker_id}")

@@ -33,17 +33,17 @@ class JsonLedgerImporter(TransactionImporter):
     def broker_id(self) -> str:
         return _BROKER_ID
 
-    def can_parse(self, content: str) -> bool:
+    def can_parse(self, content: bytes) -> bool:
         try:
             data = json.loads(content)
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
             return False
         return isinstance(data, dict) and isinstance(data.get("transactions"), list)
 
-    def parse(self, content: str) -> ImportResult:
+    def parse(self, content: bytes) -> ImportResult:
         try:
             data = json.loads(content)
-        except (json.JSONDecodeError, ValueError) as error:
+        except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as error:
             raise UnrecognizedImportFormat(_BROKER_ID) from error
         if not isinstance(data, dict) or not isinstance(data.get("transactions"), list):
             raise UnrecognizedImportFormat(_BROKER_ID)

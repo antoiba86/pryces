@@ -24,6 +24,7 @@ from ...infrastructure.fx import YahooFinanceFxProvider, YahooFinanceHistoricalF
 from ...infrastructure.importers.degiro import DegiroCsvImporter
 from ...infrastructure.importers.ibkr import IbkrActivityImporter
 from ...infrastructure.importers.json_ledger import JsonLedgerImporter
+from ...infrastructure.importers.renta4 import Renta4FundsImporter
 from ...infrastructure.logging import PythonLoggerFactory
 from ...infrastructure.providers import YahooFinanceHistoricalPriceProvider, YahooFinanceProvider
 from ...infrastructure.repositories import JsonPortfolioRepository
@@ -80,7 +81,13 @@ def get_importer_registry(
     logger_factory: LoggerFactory = Depends(get_logger_factory),
 ) -> ImporterRegistry:
     return ImporterRegistry(
-        [DegiroCsvImporter(), JsonLedgerImporter(), IbkrActivityImporter()], logger_factory
+        [
+            DegiroCsvImporter(),
+            JsonLedgerImporter(),
+            IbkrActivityImporter(),
+            Renta4FundsImporter(),
+        ],
+        logger_factory,
     )
 
 

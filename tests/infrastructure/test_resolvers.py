@@ -192,6 +192,19 @@ class TestYahooSymbolResolver:
 
         assert result == "REAL"
 
+    def test_resolves_mutual_funds(self):
+        # A fund ISIN search returns only a MUTUALFUND quote; it must resolve
+        # (funds price by NAV like a normal position).
+        def search(query):
+            return [_quote("0P000168OI.F", exchange="FRA", quote_type="MUTUALFUND")]
+
+        resolver = self._resolver(search)
+        result = resolver.resolve(
+            Instrument(symbol="ES0173311103", name="R4 Numantia", isin="ES0173311103")
+        )
+
+        assert result == "0P000168OI.F"
+
     def test_returns_none_on_search_error(self):
         def search(query):
             raise urllib.error.URLError("boom")

@@ -76,12 +76,14 @@ class DegiroCsvImporter(TransactionImporter):
     def broker_id(self) -> str:
         return _BROKER_ID
 
-    def can_parse(self, content: str) -> bool:
-        header = content.lstrip().splitlines()[0] if content.strip() else ""
+    def can_parse(self, content: bytes) -> bool:
+        text = content.decode("utf-8", errors="ignore")
+        header = text.lstrip().splitlines()[0] if text.strip() else ""
         return all(token in header for token in _HEADER_SIGNATURE)
 
-    def parse(self, content: str) -> ImportResult:
-        rows = list(csv.reader(io.StringIO(content)))
+    def parse(self, content: bytes) -> ImportResult:
+        text = content.decode("utf-8", errors="ignore")
+        rows = list(csv.reader(io.StringIO(text)))
         if not rows or not all(token in ",".join(rows[0]) for token in _HEADER_SIGNATURE):
             raise UnrecognizedImportFormat(_BROKER_ID)
 

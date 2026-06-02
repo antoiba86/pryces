@@ -51,21 +51,23 @@ class IbkrActivityImporter(TransactionImporter):
     def broker_id(self) -> str:
         return _BROKER_ID
 
-    def can_parse(self, content: str) -> bool:
-        for row in self._rows(content):
+    def can_parse(self, content: bytes) -> bool:
+        text = content.decode("utf-8", errors="ignore")
+        for row in self._rows(text):
             if row[:2] == [_SECTION, "Header"]:
                 return all(token in row for token in _HEADER_SIGNATURE)
         return False
 
-    def parse(self, content: str) -> ImportResult:
-        columns = self._header_columns(content)
+    def parse(self, content: bytes) -> ImportResult:
+        text = content.decode("utf-8", errors="ignore")
+        columns = self._header_columns(text)
         if columns is None:
             raise UnrecognizedImportFormat(_BROKER_ID)
 
         transactions: list[Transaction] = []
         instruments: dict[str, Instrument] = {}
         warnings: list[ImportWarning] = []
-        for index, row in enumerate(self._rows(content)):
+        for index, row in enumerate(self._rows(text)):
             if row[:2] != [_SECTION, "Data"]:
                 continue
             fields = self._fields(row, columns)

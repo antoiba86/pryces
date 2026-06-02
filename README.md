@@ -305,7 +305,7 @@ Available commands:
 | 9 | List Portfolios | List all portfolios with base currency and transaction count |
 | 10 | Create Portfolio | Create a new portfolio (name optional, base currency) |
 | 11 | Show Portfolio | Show a portfolio with live prices (optionally send to Telegram) |
-| 12 | Import Transactions | Import a broker export (DEGIRO CSV / JSON ledger) into a portfolio |
+| 12 | Import Transactions | Import a broker export (DEGIRO CSV / IBKR CSV / Renta 4 .xls / JSON ledger) into a portfolio |
 | 13 | Delete Portfolio | Delete an existing portfolio |
 | 14 | Check Readiness | Verify env vars and Telegram connectivity |
 | 0 | Exit | Exit the program |
@@ -505,6 +505,11 @@ Typical flow:
 2. **Import Transactions** — point at a broker export and confirm. The importer is
    auto-detected (leave the broker blank), or you can name it explicitly:
    - **DEGIRO** — the `Transactions.csv` export (trades only).
+   - **Interactive Brokers** — the Activity Statement Transaction History CSV.
+   - **Renta 4** — the "Operaciones en Fondos de Inversión" export (a binary `.xls`):
+     fund subscriptions/redemptions become buys/sells (units @ NAV). The export has no
+     ISIN, so map the fund name to its Yahoo symbol once in `~/.pryces/symbol_map.json`
+     (e.g. `"R4 MULTIGESTION NUMANTIA PATR. GLOBAL": "0P000168OI.F"`).
    - **JSON ledger** — a `{ "base_currency", "transactions" }` file, e.g. when
      migrating from another tool.
 
@@ -538,8 +543,10 @@ not always by Yahoo symbol. On import, Pryces resolves each instrument to a Yaho
 symbol (searching by ISIN, the broker ticker, and the product name) and disambiguates
 the listing first by the broker's exchange code, then — when none is given (e.g. IBKR
 rows) — by the **trade currency's home market** (an AUD trade resolves to the ASX
-listing, not a US OTC cross-listing). The mapping is cached in a user-editable file at
-`~/.pryces/symbol_map.json`. If a guess is wrong (or an instrument can't be
+listing, not a US OTC cross-listing). Stocks, ETFs, and **mutual funds** all resolve this
+way — a fund's ISIN maps to its Yahoo NAV symbol (e.g. `ES0173311103` →
+`0P000168OI.F`) and prices like any other position. The mapping is cached in a
+user-editable file at `~/.pryces/symbol_map.json`. If a guess is wrong (or an instrument can't be
 resolved — it's reported under "unresolved symbols"), edit that file: add or correct
 the `"<ISIN>": "<TICKER>"` entry and the next import/show picks it up.
 

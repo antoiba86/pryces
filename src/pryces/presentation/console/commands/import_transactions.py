@@ -81,7 +81,7 @@ class ImportTransactionsCommand(Command):
             return CommandResult("Import cancelled.")
 
         summary = self._summaries[int(kwargs.get("portfolio_selection")) - 1]
-        content = Path(kwargs.get("file_path").strip()).read_text(encoding="utf-8")
+        content = Path(kwargs.get("file_path").strip()).read_bytes()
         broker = kwargs.get("broker", "").strip() or None
 
         try:

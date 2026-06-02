@@ -45,8 +45,8 @@ _NO_VENUE = (
 )
 
 
-def _csv(*rows: str) -> str:
-    return "\n".join((_HEADER, *rows)) + "\n"
+def _csv(*rows: str) -> bytes:
+    return ("\n".join((_HEADER, *rows)) + "\n").encode("utf-8")
 
 
 @pytest.fixture
@@ -60,10 +60,10 @@ class TestCanParse:
         assert importer.can_parse(_csv(_USD_BUY)) is True
 
     def test_rejects_unrelated_csv(self, importer):
-        assert importer.can_parse("a,b,c\n1,2,3\n") is False
+        assert importer.can_parse(b"a,b,c\n1,2,3\n") is False
 
     def test_rejects_empty(self, importer):
-        assert importer.can_parse("") is False
+        assert importer.can_parse(b"") is False
 
 
 class TestParse:
@@ -133,4 +133,4 @@ class TestParse:
 
     def test_raises_on_unrecognized_content(self, importer):
         with pytest.raises(UnrecognizedImportFormat):
-            importer.parse("totally,unrelated\n1,2\n")
+            importer.parse(b"totally,unrelated\n1,2\n")
