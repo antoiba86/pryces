@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from ....application.use_cases.get_overview import GetOverview, GetOverviewRequest
-from ..dependencies import current_user_id, get_overview
-from ..schemas import OverviewResponse
+from ....application.use_cases.get_transactions import GetTransactions
+from ..dependencies import current_user_id, get_get_transactions, get_overview
+from ..schemas import OverviewResponse, TransactionResponse
 
 router = APIRouter(tags=["overview"])
 
@@ -16,3 +17,15 @@ def overview(
 ) -> OverviewResponse:
     result = overview_use_case.handle(GetOverviewRequest(user_id=user_id))
     return OverviewResponse.from_overview(result)
+
+
+@router.get("/overview/transactions", response_model=list[TransactionResponse])
+def overview_transactions(
+    symbol: str | None = Query(default=None),
+    transactions_use_case: GetTransactions = Depends(get_get_transactions),
+    user_id: int = Depends(current_user_id),
+) -> list[TransactionResponse]:
+    records = transactions_use_case.across_portfolios(symbol=symbol, user_id=user_id)
+    return [
+        TransactionResponse.from_transaction(r.transaction, portfolio=r.portfolio) for r in records
+    ]

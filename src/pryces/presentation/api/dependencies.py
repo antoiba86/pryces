@@ -16,6 +16,7 @@ from ...application.use_cases.create_portfolio import CreatePortfolio
 from ...application.use_cases.delete_portfolio import DeletePortfolio
 from ...application.use_cases.get_overview import GetOverview
 from ...application.use_cases.get_portfolio import GetPortfolio
+from ...application.use_cases.get_transactions import GetTransactions
 from ...application.use_cases.import_transactions import ImportTransactions
 from ...application.use_cases.list_portfolios import ListPortfolios
 from ...infrastructure.factories import SettingsFactory
@@ -131,6 +132,12 @@ def get_overview(
     portfolio_builder: GetPortfolio = Depends(get_get_portfolio),
 ) -> GetOverview:
     return GetOverview(repository, portfolio_builder)
+
+
+def get_get_transactions(
+    repository: PortfolioRepository = Depends(get_portfolio_repository),
+) -> GetTransactions:
+    return GetTransactions(repository)
 
 
 def get_import_transactions(

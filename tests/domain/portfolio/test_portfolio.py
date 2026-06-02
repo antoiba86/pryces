@@ -357,3 +357,75 @@ class TestRealizedAndProfit:
         unified = portfolio.unified_positions
         assert len(unified) == 1
         assert unified[0].realized_pnl_base == Decimal("100")
+
+
+class TestLifetime:
+    def test_lifetime_pnl_sums_unrealized_realized_dividends(self):
+        position = Position(
+            symbol="VYT.MC",
+            quantity=Decimal("106"),
+            avg_cost=Decimal("17.62"),
+            price=Decimal("20"),
+            currency=Currency.EUR,
+            value_base=Decimal("2120"),
+            cost_base=Decimal("1867.60"),
+            dividends_base=Decimal("10"),
+            fees_base=Decimal("0"),
+            realized_pnl_base=Decimal("676"),
+        )
+        # unrealized 252.40 + realized 676 + dividends 10
+        assert position.lifetime_pnl_base == Decimal("938.40")
+
+    def test_lifetime_return_pct_defaults_none(self):
+        assert _position().lifetime_return_pct is None
+
+    def test_merged_position_nulls_lifetime_return_pct(self):
+        a = Position(
+            symbol="AAPL",
+            quantity=Decimal("5"),
+            avg_cost=Decimal("100"),
+            price=Decimal("110"),
+            currency=Currency.USD,
+            value_base=Decimal("550"),
+            cost_base=Decimal("500"),
+            dividends_base=Decimal("0"),
+            fees_base=Decimal("0"),
+            broker="IBKR",
+            lifetime_return_pct=Decimal("12"),
+        )
+        b = Position(
+            symbol="AAPL",
+            quantity=Decimal("5"),
+            avg_cost=Decimal("100"),
+            price=Decimal("110"),
+            currency=Currency.USD,
+            value_base=Decimal("550"),
+            cost_base=Decimal("500"),
+            dividends_base=Decimal("0"),
+            fees_base=Decimal("0"),
+            broker="DEGIRO",
+            lifetime_return_pct=Decimal("8"),
+        )
+        portfolio = Portfolio(base_currency="EUR", positions=(a, b))
+        merged = portfolio.unified_positions
+        assert len(merged) == 1
+        assert merged[0].lifetime_return_pct is None
+        # lifetime P&L is additive and still correct across the merge
+        assert merged[0].lifetime_pnl_base == Decimal("100")
+
+    def test_single_source_position_keeps_lifetime_return_pct(self):
+        position = Position(
+            symbol="AAPL",
+            quantity=Decimal("5"),
+            avg_cost=Decimal("100"),
+            price=Decimal("110"),
+            currency=Currency.USD,
+            value_base=Decimal("550"),
+            cost_base=Decimal("500"),
+            dividends_base=Decimal("0"),
+            fees_base=Decimal("0"),
+            broker="IBKR",
+            lifetime_return_pct=Decimal("12"),
+        )
+        merged = Portfolio(base_currency="EUR", positions=(position,)).unified_positions
+        assert merged[0].lifetime_return_pct == Decimal("12")

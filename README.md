@@ -261,9 +261,11 @@ uvicorn pryces.presentation.api.main:app --port 8000
 | GET | `/overview` | Unified net-worth rollup across all portfolios (combined totals, merged positions, one XIRR/TWR, and a per-portfolio breakdown) |
 | GET | `/portfolios` | List portfolios |
 | POST | `/portfolios` | Create a portfolio (`{"base_currency": "EUR", "name": "main"}`) |
-| GET | `/portfolios/{name}` | Portfolio with live prices, open + closed positions, totals (incl. realized P&L and total profit), XIRR, and TWR |
+| GET | `/portfolios/{name}` | Portfolio with live prices, open + closed positions, totals (incl. realized P&L and total profit), per-position lifetime P&L + XIRR, plus portfolio XIRR and TWR |
+| GET | `/portfolios/{name}/transactions?symbol=` | The portfolio's trade history (optionally one symbol) |
 | DELETE | `/portfolios/{name}` | Delete a portfolio |
 | POST | `/portfolios/{name}/transactions` | Import a broker export (`multipart/form-data` file, optional `?broker=`) |
+| GET | `/overview/transactions?symbol=` | A symbol's trade history across all portfolios (rows tagged with their portfolio) |
 
 ```bash
 curl http://127.0.0.1:8000/health
@@ -522,6 +524,14 @@ Typical flow:
    currency at each sale's **own trade-date** FX rate (the ROI % itself is computed in
    the trade currency so exchange-rate moves don't distort it). The portfolio totals add
    `total_realized_pnl` and `total_profit` (unrealized + realized + dividends).
+
+   **Per-stock history & lifetime return.** Because Pryces uses average-cost accounting, a
+   stock you fully sell and rebuy shows its open-lot return on the position row — but each
+   position also carries a **lifetime P&L** (`lifetime_pnl_base` = unrealized + realized +
+   dividends) and a **lifetime money-weighted return** (`lifetime_return_pct`, a
+   per-position XIRR over that stock's whole buy/sell/dividend history). The full trade
+   timeline is available via the transactions endpoints above — per portfolio, or for a
+   symbol across all portfolios.
 
 **Symbol resolution.** Broker exports identify instruments by ISIN or a raw ticker,
 not always by Yahoo symbol. On import, Pryces resolves each instrument to a Yahoo

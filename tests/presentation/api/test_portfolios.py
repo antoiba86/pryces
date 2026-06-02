@@ -181,6 +181,27 @@ class TestPortfoliosApi:
         # nothing open: total_profit == realized (unrealized 0, dividends 0)
         assert Decimal(portfolio["total_profit"]) == Decimal("500")
 
+    def test_position_carries_lifetime_fields(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        _upload(client, "main", _ledger())
+
+        portfolio = client.get("/portfolios/main").json()
+        position = portfolio["positions"][0]
+        assert "lifetime_pnl_base" in position
+        assert "lifetime_return_pct" in position
+
+    def test_transaction_history_filtered_by_symbol(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        _upload(client, "main", _closed_ledger())  # AAPL buy + sell
+
+        rows = client.get("/portfolios/main/transactions", params={"symbol": "AAPL"}).json()
+
+        assert [r["type"] for r in rows] == ["buy", "sell"]  # sorted by date
+        assert all(r["symbol"] == "AAPL" for r in rows)
+
+    def test_transaction_history_missing_portfolio_404(self, client):
+        assert client.get("/portfolios/ghost/transactions").status_code == 404
+
     def test_reimport_dedupes(self, client):
         client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
         _upload(client, "main", _ledger())

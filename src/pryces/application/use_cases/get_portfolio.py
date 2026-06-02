@@ -126,6 +126,7 @@ class GetPortfolio:
             if rate is None:
                 continue
             price = stock.current_price
+            value_base = holding.quantity * price * rate
             positions.append(
                 Position(
                     symbol=holding.symbol,
@@ -133,13 +134,16 @@ class GetPortfolio:
                     avg_cost=holding.avg_cost,
                     price=price,
                     currency=holding.currency,
-                    value_base=holding.quantity * price * rate,
+                    value_base=value_base,
                     cost_base=holding.cost_total * rate,
                     dividends_base=holding.dividends * rate,
                     fees_base=holding.fees * rate,
                     broker=holding.broker,
                     realized_pnl_base=self._realized_base(holding, rate_at),
                     name=stock.name,
+                    lifetime_return_pct=self._position_xirr(
+                        holding, transactions, base_currency, value_base, historical_rates
+                    ),
                 )
             )
 
@@ -174,6 +178,20 @@ class GetPortfolio:
         xirr_pct = self._compute_xirr(transactions, base_currency, terminal_value, historical_rates)
         twr_pct = self._compute_twr(transactions, base_currency, terminal_value)
         return xirr_pct, twr_pct
+
+    def _position_xirr(
+        self,
+        holding: Holding,
+        transactions: list[Transaction],
+        base_currency: Currency,
+        value_base: Decimal,
+        historical_rates: dict[tuple[Currency, date], Decimal],
+    ) -> Decimal | None:
+        """Money-weighted return over a single holding's own transactions (same
+        symbol + broker), with its current value as the terminal inflow. Reuses
+        the already-gathered historical FX rates — no extra network calls."""
+        own = [t for t in transactions if t.symbol == holding.symbol and t.broker == holding.broker]
+        return self._compute_xirr(own, base_currency, value_base, historical_rates)
 
     def _realized_base(
         self,

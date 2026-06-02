@@ -24,6 +24,10 @@ class Position:
     realized_pnl_base: Decimal = Decimal("0")
     # Human-readable instrument name from the live quote (e.g. "Apple Inc.").
     name: str | None = None
+    # Money-weighted (XIRR) return over this holding's whole history (all
+    # buys/sells/dividends + current value). None when it can't be computed or
+    # when the position is a cross-source merge (XIRR isn't averageable).
+    lifetime_return_pct: Decimal | None = None
 
     @property
     def unrealized_pnl_base(self) -> Decimal:
@@ -32,6 +36,12 @@ class Position:
     @property
     def total_return_pct(self) -> Decimal:
         return total_return(self.value_base, self.cost_base, self.dividends_base, self.fees_base)
+
+    @property
+    def lifetime_pnl_base(self) -> Decimal:
+        """Total result for this stock: paper gain on what's held now + realized
+        gains already booked + dividends received (all base currency)."""
+        return self.unrealized_pnl_base + self.realized_pnl_base + self.dividends_base
 
 
 @dataclass(frozen=True, slots=True)

@@ -14,12 +14,14 @@ from ....application.use_cases.import_transactions import (
     ImportTransactions,
     ImportTransactionsRequest,
 )
+from ....application.use_cases.get_transactions import GetTransactions
 from ....application.use_cases.list_portfolios import ListPortfolios
 from ..dependencies import (
     current_user_id,
     get_create_portfolio,
     get_delete_portfolio,
     get_get_portfolio,
+    get_get_transactions,
     get_import_transactions,
     get_list_portfolios,
 )
@@ -28,6 +30,7 @@ from ..schemas import (
     ImportResultResponse,
     PortfolioResponse,
     PortfolioSummaryResponse,
+    TransactionResponse,
 )
 
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])
@@ -70,6 +73,20 @@ def get_portfolio(
     except PortfolioNotFound as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
     return PortfolioResponse.from_portfolio(portfolio)
+
+
+@router.get("/{name}/transactions", response_model=list[TransactionResponse])
+def get_portfolio_transactions(
+    name: str,
+    symbol: str | None = Query(default=None),
+    transactions_use_case: GetTransactions = Depends(get_get_transactions),
+    user_id: int = Depends(current_user_id),
+) -> list[TransactionResponse]:
+    try:
+        records = transactions_use_case.for_portfolio(name, symbol=symbol, user_id=user_id)
+    except PortfolioNotFound as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+    return [TransactionResponse.from_transaction(r.transaction) for r in records]
 
 
 @router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)

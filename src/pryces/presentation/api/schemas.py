@@ -45,7 +45,9 @@ class PositionResponse(BaseModel):
     cost_base: str
     unrealized_pnl_base: str
     realized_pnl_base: str
+    lifetime_pnl_base: str
     total_return_pct: str
+    lifetime_return_pct: str | None = None
     broker: str | None = None
 
     @classmethod
@@ -61,7 +63,9 @@ class PositionResponse(BaseModel):
             cost_base=str(position.cost_base),
             unrealized_pnl_base=str(position.unrealized_pnl_base),
             realized_pnl_base=str(position.realized_pnl_base),
+            lifetime_pnl_base=str(position.lifetime_pnl_base),
             total_return_pct=str(position.total_return_pct),
+            lifetime_return_pct=_str(position.lifetime_return_pct),
             broker=position.broker,
         )
 
@@ -135,6 +139,34 @@ class PortfolioResponse(BaseModel):
             total_return_pct=str(portfolio.total_return_pct),
             xirr_pct=_str(portfolio.xirr_pct),
             twr_pct=_str(portfolio.twr_pct),
+        )
+
+
+class TransactionResponse(BaseModel):
+    date: str
+    type: str
+    symbol: str
+    quantity: str | None = None
+    price: str | None = None
+    amount: str | None = None
+    fee: str
+    currency: str
+    broker: str | None = None
+    portfolio: str | None = None
+
+    @classmethod
+    def from_transaction(cls, transaction, portfolio: str | None = None) -> TransactionResponse:
+        return cls(
+            date=transaction.date.isoformat(),
+            type=transaction.type.value,
+            symbol=transaction.symbol,
+            quantity=_str(transaction.quantity),
+            price=_str(transaction.price),
+            amount=_str(transaction.amount),
+            fee=str(transaction.fee),
+            currency=transaction.currency.value,
+            broker=transaction.broker,
+            portfolio=portfolio,
         )
 
 

@@ -104,3 +104,21 @@ class TestOverviewApi:
         # 10*100 + 10*100 = 2000 (fake price 100, fx 1)
         assert Decimal(body["portfolio"]["total_value"]) == Decimal("2000")
         assert {b["name"] for b in body["breakdown"]} == {"degiro", "ibkr"}
+
+    def test_overview_transactions_across_portfolios(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "degiro"})
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "ibkr"})
+        client.post(
+            "/portfolios/degiro/transactions",
+            files={"file": ("l.json", _ledger("AAPL", "a1"), "application/json")},
+        )
+        client.post(
+            "/portfolios/ibkr/transactions",
+            files={"file": ("l.json", _ledger("AAPL", "b1"), "application/json")},
+        )
+
+        rows = client.get("/overview/transactions", params={"symbol": "AAPL"}).json()
+
+        assert len(rows) == 2
+        assert {r["portfolio"] for r in rows} == {"degiro", "ibkr"}
+        assert all(r["symbol"] == "AAPL" for r in rows)

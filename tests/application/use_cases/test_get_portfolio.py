@@ -455,3 +455,44 @@ class TestGetPortfolioRealized:
         assert result.positions[0].name == "Apple Inc."
         # realized native = 4*150 - 4*100 = 200, at rate 1.0 -> 200
         assert result.positions[0].realized_pnl_base == Decimal("200.0")
+
+
+class TestGetPortfolioLifetime:
+    def setup_method(self):
+        self.repo = Mock(spec=PortfolioRepository)
+        self.stock = Mock(spec=StockProvider)
+        self.fx = Mock(spec=FxRateProvider)
+        self.repo.get_manual_assets.return_value = []
+
+    def _use_case(self):
+        return GetPortfolio(
+            repository=self.repo,
+            stock_provider=self.stock,
+            fx_provider=self.fx,
+            historical_fx_provider=_FakeHistoricalFx(),
+            clock=lambda: date(2026, 6, 1),
+        )
+
+    def test_buy_sell_all_rebuy_keeps_lifetime_result(self):
+        # VYTRUS shape: bought, fully sold (realized gain), then rebought.
+        self.repo.find_summary_by_name.return_value = _summary(base="EUR")
+        self.repo.get_transactions.return_value = [
+            _buy("VYT.MC", "20", "10", Currency.EUR, fee="2", when=date(2026, 2, 3)),
+            _buy("VYT.MC", "80", "12.10", Currency.EUR, fee="2", when=date(2026, 3, 3)),
+            _sell("VYT.MC", "100", "18.50", Currency.EUR, fee="2", when=date(2026, 4, 10)),
+            _buy("VYT.MC", "106", "17.60", Currency.EUR, fee="2", when=date(2026, 4, 17)),
+        ]
+        self.stock.get_stocks.return_value = [_live("VYT.MC", "20")]
+        self.fx.get_rates.return_value = {Currency.EUR: Decimal("1")}
+
+        result = self._use_case().handle(GetPortfolioRequest(name="main"))
+
+        assert len(result.positions) == 1
+        position = result.positions[0]
+        # Realized gain from the first round-trip is preserved on the open position.
+        assert position.realized_pnl_base == Decimal("676.00")
+        # Lifetime P&L = unrealized (2120 - 1867.60) + realized 676 + dividends 0.
+        assert position.lifetime_pnl_base == Decimal("928.40")
+        # And a money-weighted lifetime return is computed over its own history.
+        assert position.lifetime_return_pct is not None
+        assert position.lifetime_return_pct > 0
