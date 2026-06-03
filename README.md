@@ -262,9 +262,12 @@ uvicorn pryces.presentation.api.main:app --port 8000
 | GET | `/portfolios` | List portfolios |
 | POST | `/portfolios` | Create a portfolio (`{"base_currency": "EUR", "name": "main"}`) |
 | GET | `/portfolios/{name}` | Portfolio with live prices, open + closed positions, totals (incl. realized P&L and total profit), per-position lifetime P&L + XIRR, plus portfolio XIRR and TWR |
-| GET | `/portfolios/{name}/transactions?symbol=` | The portfolio's trade history (optionally one symbol) |
+| GET | `/portfolios/{name}/transactions?symbol=` | The portfolio's trade history (optionally one symbol); each row carries a stable `id` |
 | DELETE | `/portfolios/{name}` | Delete a portfolio |
-| POST | `/portfolios/{name}/transactions` | Import a broker export (`multipart/form-data` file, optional `?broker=`) |
+| POST | `/portfolios/{name}/transactions` | Import a broker export (`multipart/form-data` file, optional `?broker=`). A portfolio holds one broker: importing a *different* broker (or fund) into a portfolio that already has one returns **409** |
+| POST | `/portfolios/{name}/transactions/manual` | Hand-add a single transaction (JSON body: `date`, `type`, `symbol`, `currency`, optional `quantity`/`price`/`amount`/`fee`). Manual entries are broker-less and always allowed |
+| PATCH | `/portfolios/{name}/transactions/{id}` | Edit a transaction's fields (same JSON body) |
+| DELETE | `/portfolios/{name}/transactions/{id}` | Delete a transaction |
 | GET | `/overview/transactions?symbol=` | A symbol's trade history across all portfolios (rows tagged with their portfolio) |
 
 ```bash
@@ -517,7 +520,17 @@ Typical flow:
      migrating from another tool.
 
    Re-importing the same file is safe: rows are deduplicated by broker + order id,
-   so the second run reports `inserted: 0`.
+   so the second run reports `inserted: 0`. A portfolio holds a **single broker** —
+   re-importing the *same* broker is fine, but importing a *different* broker (or a fund)
+   into a portfolio that already has one is rejected (409). The broker isn't chosen up
+   front: an empty (or manual-only) portfolio adopts the broker of its first file import.
+
+   **Fixing or hand-adding trades.** If an imported row is wrong or your broker's export
+   omitted a trade, you can edit or delete any transaction, or hand-add one, via the
+   `…/transactions/manual` (add), `PATCH …/transactions/{id}` (edit) and
+   `DELETE …/transactions/{id}` (delete) endpoints. Manual entries are **broker-less**, so
+   they're always allowed and never lock a portfolio to a broker — you can build a whole
+   portfolio by hand and still import a broker file into it later.
 3. **Show Portfolio** — fetches live prices and FX rates (via the same Yahoo Finance
    provider used for stock monitoring), prints holdings, totals, total return, and a
    money-weighted **XIRR** and a time-weighted **TWR** (both annualized; XIRR is

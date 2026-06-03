@@ -3,7 +3,10 @@ from decimal import Decimal
 
 import pytest
 
-from pryces.application.exceptions import UnrecognizedImportFormat
+from pryces.application.exceptions import (
+    PortfolioBrokerMismatch,
+    UnrecognizedImportFormat,
+)
 from pryces.application.importers import ImporterRegistry
 from pryces.application.use_cases.import_transactions import (
     ImportTransactions,
@@ -61,16 +64,20 @@ class _MapResolver:
 
 
 class _RecordingRepository:
-    def __init__(self, inserted=0):
+    def __init__(self, inserted=0, existing=None):
         self.inserted = inserted
+        self.existing = existing or []
         self.received = None
+
+    def get_transactions(self, portfolio_name, user_id=1):
+        return self.existing
 
     def add_transactions(self, portfolio_name, transactions, user_id=1):
         self.received = (portfolio_name, transactions, user_id)
         return self.inserted
 
 
-def _transaction(symbol, raw_id="r1"):
+def _transaction(symbol, raw_id="r1", broker="DEGIRO"):
     return Transaction(
         date=date(2024, 1, 10),
         type=TransactionType.BUY,
@@ -78,7 +85,7 @@ def _transaction(symbol, raw_id="r1"):
         currency=Currency.USD,
         quantity=Decimal("5"),
         price=Decimal("100"),
-        broker="DEGIRO",
+        broker=broker,
         raw_id=raw_id,
     )
 
@@ -172,4 +179,52 @@ class TestImportTransactions:
         use_case = _use_case(importer, _MapResolver({}), _RecordingRepository())
 
         with pytest.raises(UnrecognizedImportFormat):
+            use_case.handle(ImportTransactionsRequest("main", "csv"))
+
+    def test_empty_portfolio_adopts_the_imported_broker(self):
+        result = ImportResult(transactions=(_transaction("AAPL", broker="DEGIRO"),))
+        repository = _RecordingRepository(inserted=1, existing=[])
+        use_case = _use_case(
+            _StubImporter("degiro", result), _MapResolver({"AAPL": "AAPL"}), repository
+        )
+
+        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+
+        assert dto.inserted == 1
+
+    def test_same_broker_reimport_is_allowed(self):
+        result = ImportResult(transactions=(_transaction("AAPL", broker="DEGIRO"),))
+        repository = _RecordingRepository(
+            inserted=0, existing=[_transaction("MSFT", broker="DEGIRO")]
+        )
+        use_case = _use_case(
+            _StubImporter("degiro", result), _MapResolver({"AAPL": "AAPL"}), repository
+        )
+
+        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+
+        assert dto.broker == "degiro"
+
+    def test_manual_only_portfolio_accepts_first_import(self):
+        # Manual entries carry broker=None and never lock the portfolio.
+        result = ImportResult(transactions=(_transaction("AAPL", broker="DEGIRO"),))
+        repository = _RecordingRepository(
+            inserted=1, existing=[_transaction("MSFT", broker=None, raw_id="manual-1")]
+        )
+        use_case = _use_case(
+            _StubImporter("degiro", result), _MapResolver({"AAPL": "AAPL"}), repository
+        )
+
+        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+
+        assert dto.inserted == 1
+
+    def test_different_broker_raises_mismatch(self):
+        result = ImportResult(transactions=(_transaction("AAPL", broker="IBKR"),))
+        repository = _RecordingRepository(existing=[_transaction("MSFT", broker="DEGIRO")])
+        use_case = _use_case(
+            _StubImporter("ibkr", result), _MapResolver({"AAPL": "AAPL"}), repository
+        )
+
+        with pytest.raises(PortfolioBrokerMismatch):
             use_case.handle(ImportTransactionsRequest("main", "csv"))

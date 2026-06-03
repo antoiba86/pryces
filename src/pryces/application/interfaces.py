@@ -161,7 +161,48 @@ class PortfolioRepository(ABC):
         pass
 
     @abstractmethod
+    def add_transaction(
+        self,
+        portfolio_name: str,
+        transaction: Transaction,
+        user_id: int = 1,
+    ) -> str:
+        # Appends one transaction unconditionally (no dedup — manual entries have
+        # no broker/raw_id). Returns the stable id assigned to the new row.
+        pass
+
+    @abstractmethod
+    def update_transaction(
+        self,
+        portfolio_name: str,
+        transaction_id: str,
+        transaction: Transaction,
+        user_id: int = 1,
+    ) -> None:
+        # Replaces the addressed row's editable fields, preserving its id, broker
+        # and raw_id. Raises TransactionNotFound when the id is absent.
+        pass
+
+    @abstractmethod
+    def delete_transaction(
+        self,
+        portfolio_name: str,
+        transaction_id: str,
+        user_id: int = 1,
+    ) -> None:
+        # Raises TransactionNotFound when the id is absent.
+        pass
+
+    @abstractmethod
     def get_transactions(self, portfolio_name: str, user_id: int = 1) -> list[Transaction]:
+        pass
+
+    @abstractmethod
+    def get_transactions_with_ids(
+        self, portfolio_name: str, user_id: int = 1
+    ) -> list[tuple[str, Transaction]]:
+        # Like get_transactions but pairs each transaction with its stable id for
+        # the management view; lazily backfills ids on rows that predate them.
         pass
 
     @abstractmethod

@@ -19,6 +19,11 @@ from ...application.use_cases.get_portfolio import GetPortfolio
 from ...application.use_cases.get_transactions import GetTransactions
 from ...application.use_cases.import_transactions import ImportTransactions
 from ...application.use_cases.list_portfolios import ListPortfolios
+from ...application.use_cases.manage_transactions import (
+    AddTransaction,
+    DeleteTransaction,
+    UpdateTransaction,
+)
 from ...infrastructure.factories import SettingsFactory
 from ...infrastructure.fx import YahooFinanceFxProvider, YahooFinanceHistoricalFxProvider
 from ...infrastructure.importers.degiro import DegiroCsvImporter
@@ -155,3 +160,22 @@ def get_import_transactions(
     repository: PortfolioRepository = Depends(get_portfolio_repository),
 ) -> ImportTransactions:
     return ImportTransactions(registry, resolver, repository)
+
+
+def get_add_transaction(
+    repository: PortfolioRepository = Depends(get_portfolio_repository),
+    resolver: SymbolResolver = Depends(get_symbol_resolver),
+) -> AddTransaction:
+    return AddTransaction(repository, resolver)
+
+
+def get_update_transaction(
+    repository: PortfolioRepository = Depends(get_portfolio_repository),
+) -> UpdateTransaction:
+    return UpdateTransaction(repository)
+
+
+def get_delete_transaction(
+    repository: PortfolioRepository = Depends(get_portfolio_repository),
+) -> DeleteTransaction:
+    return DeleteTransaction(repository)
