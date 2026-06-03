@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel
@@ -143,6 +144,7 @@ class PortfolioResponse(BaseModel):
 
 
 class TransactionResponse(BaseModel):
+    id: str
     date: str
     type: str
     symbol: str
@@ -155,8 +157,10 @@ class TransactionResponse(BaseModel):
     portfolio: str | None = None
 
     @classmethod
-    def from_transaction(cls, transaction, portfolio: str | None = None) -> TransactionResponse:
+    def from_record(cls, record) -> TransactionResponse:
+        transaction = record.transaction
         return cls(
+            id=record.id,
             date=transaction.date.isoformat(),
             type=transaction.type.value,
             symbol=transaction.symbol,
@@ -166,8 +170,22 @@ class TransactionResponse(BaseModel):
             fee=str(transaction.fee),
             currency=transaction.currency.value,
             broker=transaction.broker,
-            portfolio=portfolio,
+            portfolio=record.portfolio,
         )
+
+
+class TransactionBody(BaseModel):
+    """Manual add / edit payload. Decimals arrive as strings to preserve precision
+    (the API's money convention); the route converts and validates them."""
+
+    date: date
+    type: str
+    symbol: str
+    currency: str
+    quantity: str | None = None
+    price: str | None = None
+    amount: str | None = None
+    fee: str = "0"
 
 
 class PortfolioBreakdownItem(BaseModel):

@@ -69,6 +69,16 @@ class TransactionValidationError(ValueError):
     pass
 
 
+def distinct_brokers(transactions: list[Transaction]) -> set[str]:
+    """The set of non-None broker labels carried by a portfolio's transactions.
+
+    Manual entries carry `broker = None` and are ignored, so a portfolio filled
+    only with manual entries has no broker. A well-formed single-broker portfolio
+    yields a set of size 0 (empty/manual-only) or 1.
+    """
+    return {t.broker for t in transactions if t.broker is not None}
+
+
 def normalize_transactions(transactions: list[Transaction]) -> list[Transaction]:
     normalized: list[Transaction] = []
     for transaction in transactions:

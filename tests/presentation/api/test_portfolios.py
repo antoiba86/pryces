@@ -45,7 +45,7 @@ class _FakeResolver:
         return instrument.symbol
 
 
-def _ledger(symbol="AAPL", raw_id="t1"):
+def _ledger(symbol="AAPL", raw_id="t1", broker="TEST"):
     return json.dumps(
         {
             "base_currency": "EUR",
@@ -58,7 +58,7 @@ def _ledger(symbol="AAPL", raw_id="t1"):
                     "quantity": "5",
                     "price": "100.00",
                     "fee": "1.0",
-                    "broker": "TEST",
+                    "broker": broker,
                     "raw_id": raw_id,
                 }
             ],
@@ -220,3 +220,98 @@ class TestPortfoliosApi:
         result = _upload(client, "main", "not a recognized export")
 
         assert result.status_code == 422
+
+    def test_import_different_broker_conflicts(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        assert _upload(client, "main", _ledger(broker="TEST")).status_code == 200
+
+        clash = _upload(client, "main", _ledger(symbol="MSFT", raw_id="t2", broker="OTHER"))
+
+        assert clash.status_code == 409
+
+
+def _manual_body(**overrides):
+    body = {
+        "date": "2024-02-01",
+        "type": "buy",
+        "symbol": "AAPL",
+        "currency": "USD",
+        "quantity": "3",
+        "price": "50",
+        "fee": "0.5",
+    }
+    body.update(overrides)
+    return body
+
+
+class TestManualTransactionsApi:
+
+    def test_add_manual_transaction_then_appears_with_id(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+
+        added = client.post("/portfolios/main/transactions/manual", json=_manual_body())
+        assert added.status_code == 201
+        transaction_id = added.json()["id"]
+
+        rows = client.get("/portfolios/main/transactions").json()
+        assert [r["id"] for r in rows] == [transaction_id]
+        assert rows[0]["broker"] is None
+
+    def test_add_manual_into_missing_portfolio_404(self, client):
+        assert (
+            client.post("/portfolios/ghost/transactions/manual", json=_manual_body()).status_code
+            == 404
+        )
+
+    def test_add_manual_invalid_type_422(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        bad = client.post(
+            "/portfolios/main/transactions/manual", json=_manual_body(type="nonsense")
+        )
+        assert bad.status_code == 422
+
+    def test_edit_transaction_updates_fields(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        transaction_id = client.post(
+            "/portfolios/main/transactions/manual", json=_manual_body()
+        ).json()["id"]
+
+        edited = client.patch(
+            f"/portfolios/main/transactions/{transaction_id}",
+            json=_manual_body(symbol="MSFT", quantity="7"),
+        )
+        assert edited.status_code == 204
+
+        rows = client.get("/portfolios/main/transactions").json()
+        assert rows[0]["symbol"] == "MSFT"
+        assert rows[0]["quantity"] == "7"
+
+    def test_edit_missing_transaction_404(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        assert (
+            client.patch("/portfolios/main/transactions/nope", json=_manual_body()).status_code
+            == 404
+        )
+
+    def test_delete_transaction(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        transaction_id = client.post(
+            "/portfolios/main/transactions/manual", json=_manual_body()
+        ).json()["id"]
+
+        deleted = client.delete(f"/portfolios/main/transactions/{transaction_id}")
+        assert deleted.status_code == 204
+        assert client.get("/portfolios/main/transactions").json() == []
+
+    def test_delete_missing_transaction_404(self, client):
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        assert client.delete("/portfolios/main/transactions/nope").status_code == 404
+
+    def test_manual_then_import_adopts_broker(self, client):
+        # A manual-only portfolio is broker-less, so a first import is accepted.
+        client.post("/portfolios", json={"base_currency": "EUR", "name": "main"})
+        client.post("/portfolios/main/transactions/manual", json=_manual_body())
+
+        imported = _upload(client, "main", _ledger(symbol="GOOG", raw_id="z1", broker="TEST"))
+        assert imported.status_code == 200
+        assert imported.json()["inserted"] == 1

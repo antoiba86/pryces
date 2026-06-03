@@ -26,3 +26,20 @@ class UnrecognizedImportFormat(Exception):
     def __init__(self, broker_id: str) -> None:
         self.broker_id = broker_id
         super().__init__(f"Content is not a valid {broker_id} import")
+
+
+class PortfolioBrokerMismatch(Exception):
+    """A file import would mix brokers in a single-broker portfolio."""
+
+    def __init__(self, existing: str, incoming: str) -> None:
+        self.existing = existing
+        self.incoming = incoming
+        super().__init__(
+            f"Portfolio only accepts {existing} transactions; cannot import {incoming}"
+        )
+
+
+class TransactionNotFound(Exception):
+    def __init__(self, transaction_id: str) -> None:
+        self.transaction_id = transaction_id
+        super().__init__(f"Transaction not found: {transaction_id}")

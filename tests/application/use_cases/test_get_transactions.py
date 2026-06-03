@@ -29,20 +29,21 @@ class TestGetTransactions:
         self.use_case = GetTransactions(self.repo)
 
     def test_for_portfolio_filters_by_symbol_and_sorts(self):
-        self.repo.get_transactions.return_value = [
-            _buy("VYT.MC", date(2026, 3, 3)),
-            _buy("AAPL", date(2026, 1, 1)),
-            _buy("VYT.MC", date(2026, 2, 3)),
+        self.repo.get_transactions_with_ids.return_value = [
+            ("c", _buy("VYT.MC", date(2026, 3, 3))),
+            ("a", _buy("AAPL", date(2026, 1, 1))),
+            ("b", _buy("VYT.MC", date(2026, 2, 3))),
         ]
 
         records = self.use_case.for_portfolio("degiro", symbol="vyt.mc")
 
         assert [r.transaction.symbol for r in records] == ["VYT.MC", "VYT.MC"]
         assert [r.transaction.date for r in records] == [date(2026, 2, 3), date(2026, 3, 3)]
+        assert [r.id for r in records] == ["b", "c"]
         assert {r.portfolio for r in records} == {"degiro"}
 
     def test_for_portfolio_propagates_not_found(self):
-        self.repo.get_transactions.side_effect = PortfolioNotFound("ghost")
+        self.repo.get_transactions_with_ids.side_effect = PortfolioNotFound("ghost")
 
         with pytest.raises(PortfolioNotFound):
             self.use_case.for_portfolio("ghost")
@@ -53,10 +54,13 @@ class TestGetTransactions:
             PortfolioSummary(name="ibkr", base_currency="EUR", transaction_count=1),
         ]
         by_name = {
-            "degiro": [_buy("VYT.MC", date(2026, 3, 3))],
-            "ibkr": [_buy("VYT.MC", date(2026, 1, 5)), _buy("AAPL", date(2026, 2, 2))],
+            "degiro": [("d1", _buy("VYT.MC", date(2026, 3, 3)))],
+            "ibkr": [
+                ("i1", _buy("VYT.MC", date(2026, 1, 5))),
+                ("i2", _buy("AAPL", date(2026, 2, 2))),
+            ],
         }
-        self.repo.get_transactions.side_effect = lambda name, user_id: by_name[name]
+        self.repo.get_transactions_with_ids.side_effect = lambda name, user_id: by_name[name]
 
         records = self.use_case.across_portfolios(symbol="VYT.MC")
 

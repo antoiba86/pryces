@@ -4,7 +4,11 @@ from decimal import Decimal
 
 import pytest
 
-from pryces.application.exceptions import PortfolioAlreadyExists, PortfolioNotFound
+from pryces.application.exceptions import (
+    PortfolioAlreadyExists,
+    PortfolioNotFound,
+    TransactionNotFound,
+)
 from pryces.domain.portfolio.portfolio import ManualAsset
 from pryces.domain.portfolio.transactions import Transaction, TransactionType
 from pryces.domain.stocks import Currency
@@ -357,6 +361,92 @@ class TestAddTransactions:
         repo.create("EUR", name="main")
         repo.add_transactions("main", [_buy(raw_id="a")])
         assert repo.add_transactions("main", [_buy(raw_id="a")]) == 0
+
+
+def _manual(symbol="AAPL", quantity="3", price="50") -> Transaction:
+    return Transaction(
+        date=date(2024, 2, 1),
+        type=TransactionType.BUY,
+        symbol=symbol,
+        currency=Currency.USD,
+        quantity=Decimal(quantity),
+        price=Decimal(price),
+        broker=None,
+        raw_id="manual-1",
+    )
+
+
+class TestManageTransactions:
+    def test_add_transaction_returns_id_and_persists(self, repo):
+        repo.create("EUR", name="main")
+        transaction_id = repo.add_transaction("main", _manual())
+        rows = repo.get_transactions_with_ids("main")
+        assert [row_id for row_id, _ in rows] == [transaction_id]
+        assert rows[0][1].symbol == "AAPL"
+
+    def test_add_to_missing_portfolio_raises(self, repo):
+        with pytest.raises(PortfolioNotFound):
+            repo.add_transaction("missing", _manual())
+
+    def test_get_transactions_with_ids_backfills_missing_ids(self, repo):
+        repo.create("EUR", name="main")
+        repo.add_transactions("main", [_buy(raw_id="a")])
+        # Simulate a legacy row written before stable ids existed.
+        _, path = repo._load_portfolio("main", 1)
+        data = repo._read_json(path)
+        del data["transactions"][0]["id"]
+        repo._write_json(path, data)
+
+        rows = repo.get_transactions_with_ids("main")
+        assert rows[0][0]  # an id was assigned
+
+        # The backfilled id is persisted (stable across reads).
+        rows_again = repo.get_transactions_with_ids("main")
+        assert rows_again[0][0] == rows[0][0]
+
+    def test_update_transaction_replaces_fields_keeps_identity(self, repo):
+        repo.create("EUR", name="main")
+        repo.add_transactions("main", [_buy(symbol="AAPL", quantity="5", raw_id="a")])
+        transaction_id, _ = repo.get_transactions_with_ids("main")[0]
+
+        repo.update_transaction(
+            "main",
+            transaction_id,
+            _buy(symbol="MSFT", quantity="9", broker="IGNORED", raw_id="ignored"),
+        )
+
+        new_id, txn = repo.get_transactions_with_ids("main")[0]
+        assert new_id == transaction_id
+        assert txn.symbol == "MSFT"
+        assert txn.quantity == Decimal("9")
+        # broker + raw_id are identity keys: the stored ones are preserved.
+        assert txn.broker == "IBKR"
+        assert txn.raw_id == "a"
+
+    def test_update_missing_transaction_raises(self, repo):
+        repo.create("EUR", name="main")
+        with pytest.raises(TransactionNotFound):
+            repo.update_transaction("main", "nope", _manual())
+
+    def test_delete_transaction_removes_row(self, repo):
+        repo.create("EUR", name="main")
+        repo.add_transactions("main", [_buy(raw_id="a"), _buy(raw_id="b")])
+        rows = repo.get_transactions_with_ids("main")
+        repo.delete_transaction("main", rows[0][0])
+        remaining = repo.get_transactions_with_ids("main")
+        assert [row_id for row_id, _ in remaining] == [rows[1][0]]
+
+    def test_delete_missing_transaction_raises(self, repo):
+        repo.create("EUR", name="main")
+        with pytest.raises(TransactionNotFound):
+            repo.delete_transaction("main", "nope")
+
+    def test_imported_rows_get_stable_ids(self, repo):
+        repo.create("EUR", name="main")
+        repo.add_transactions("main", [_buy(raw_id="a"), _buy(raw_id="b")])
+        ids = [row_id for row_id, _ in repo.get_transactions_with_ids("main")]
+        assert len(ids) == 2
+        assert len(set(ids)) == 2  # unique
 
 
 class TestDecimalPrecision:

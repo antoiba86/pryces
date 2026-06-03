@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from ...domain.portfolio.transactions import Instrument, Transaction
+from ...domain.portfolio.transactions import Instrument, Transaction, distinct_brokers
 from ..dtos import ImportResultDTO
-from ..exceptions import UnrecognizedImportFormat
+from ..exceptions import PortfolioBrokerMismatch, UnrecognizedImportFormat
 from ..importers import ImporterRegistry
 from ..interfaces import PortfolioRepository, SymbolResolver
 
@@ -51,6 +51,18 @@ class ImportTransactions:
         transactions = [
             replace(tx, symbol=mapping.get(tx.symbol, tx.symbol)) for tx in result.transactions
         ]
+
+        # Single-broker rule: a portfolio holds one broker. An import is allowed
+        # only into an empty/manual-only portfolio (which then adopts the file's
+        # broker) or one already on that same broker. Compare on the broker label
+        # the transactions carry (manual entries carry None and are ignored).
+        existing = distinct_brokers(
+            self._repository.get_transactions(request.portfolio_name, request.user_id)
+        )
+        incoming = distinct_brokers(transactions)
+        if len(existing | incoming) > 1:
+            raise PortfolioBrokerMismatch(", ".join(sorted(existing)), ", ".join(sorted(incoming)))
+
         inserted = self._repository.add_transactions(
             request.portfolio_name, transactions, request.user_id
         )

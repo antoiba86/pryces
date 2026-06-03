@@ -118,3 +118,22 @@ class TestParse:
     def test_raises_on_unrecognized_content(self, importer):
         with pytest.raises(UnrecognizedImportFormat):
             importer.parse(b"totally,unrelated\n1,2\n")
+
+
+def _binary_xls() -> bytes:
+    import io as _io
+    import xlwt
+
+    wb = xlwt.Workbook()
+    ws = wb.add_sheet("S")
+    ws.write(0, 0, "x")
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+class TestCanParseRobustness:
+    def test_can_parse_does_not_raise_on_binary_xls(self, importer):
+        # A binary .xls reaching auto-detection must return False, never raise
+        # (csv.reader chokes on the decoded garbage otherwise).
+        assert importer.can_parse(_binary_xls()) is False

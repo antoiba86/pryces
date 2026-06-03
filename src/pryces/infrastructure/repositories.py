@@ -7,8 +7,13 @@ from collections.abc import Callable
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from uuid import uuid4
 
-from ..application.exceptions import PortfolioAlreadyExists, PortfolioNotFound
+from ..application.exceptions import (
+    PortfolioAlreadyExists,
+    PortfolioNotFound,
+    TransactionNotFound,
+)
 from ..application.interfaces import PortfolioRepository, StockRepository
 from ..domain.portfolio.portfolio import ManualAsset, PortfolioSummary
 from ..domain.portfolio.transactions import Transaction, TransactionType
@@ -174,7 +179,7 @@ class JsonPortfolioRepository(PortfolioRepository):
             key = (transaction.broker, transaction.raw_id)
             if transaction.raw_id is not None and key in existing_keys:
                 continue
-            data["transactions"].append(_transaction_to_dict(transaction))
+            data["transactions"].append(_new_row(transaction))
             if transaction.raw_id is not None:
                 existing_keys.add(key)
             added += 1
@@ -182,9 +187,71 @@ class JsonPortfolioRepository(PortfolioRepository):
             self._write_json(path, data)
         return added
 
+    def add_transaction(
+        self,
+        portfolio_name: str,
+        transaction: Transaction,
+        user_id: int = 1,
+    ) -> str:
+        data, path = self._load_portfolio(portfolio_name, user_id)
+        row = _new_row(transaction)
+        data["transactions"].append(row)
+        self._write_json(path, data)
+        return row["id"]
+
+    def update_transaction(
+        self,
+        portfolio_name: str,
+        transaction_id: str,
+        transaction: Transaction,
+        user_id: int = 1,
+    ) -> None:
+        data, path = self._load_portfolio(portfolio_name, user_id)
+        for index, row in enumerate(data["transactions"]):
+            if row.get("id") == transaction_id:
+                # The id, broker and raw_id are identity/dedup keys, not editable
+                # fields — preserve whatever the stored row carried.
+                updated = _transaction_to_dict(transaction)
+                updated["id"] = transaction_id
+                if row.get("broker") is not None:
+                    updated["broker"] = row["broker"]
+                else:
+                    updated.pop("broker", None)
+                if row.get("raw_id") is not None:
+                    updated["raw_id"] = row["raw_id"]
+                else:
+                    updated.pop("raw_id", None)
+                data["transactions"][index] = updated
+                self._write_json(path, data)
+                return
+        raise TransactionNotFound(transaction_id)
+
+    def delete_transaction(
+        self,
+        portfolio_name: str,
+        transaction_id: str,
+        user_id: int = 1,
+    ) -> None:
+        data, path = self._load_portfolio(portfolio_name, user_id)
+        remaining = [row for row in data["transactions"] if row.get("id") != transaction_id]
+        if len(remaining) == len(data["transactions"]):
+            raise TransactionNotFound(transaction_id)
+        data["transactions"] = remaining
+        self._write_json(path, data)
+
     def get_transactions(self, portfolio_name: str, user_id: int = 1) -> list[Transaction]:
         data, _ = self._load_portfolio(portfolio_name, user_id)
         return [_dict_to_transaction(row) for row in data["transactions"]]
+
+    def get_transactions_with_ids(
+        self, portfolio_name: str, user_id: int = 1
+    ) -> list[tuple[str, Transaction]]:
+        data, path = self._load_portfolio(portfolio_name, user_id)
+        # Rows that predate the stable id get one lazily on first management read,
+        # so edit/delete have a stable handle without a separate migration pass.
+        if _backfill_ids(data["transactions"]):
+            self._write_json(path, data)
+        return [(row["id"], _dict_to_transaction(row)) for row in data["transactions"]]
 
     def set_manual_assets(
         self,
@@ -263,6 +330,21 @@ def _utc_now() -> datetime:
 
 def _build_filename(now: datetime) -> str:
     return now.strftime("portfolio_%Y%m%dT%H%M%S%fZ.json")
+
+
+def _new_row(transaction: Transaction) -> dict:
+    row = _transaction_to_dict(transaction)
+    row["id"] = uuid4().hex
+    return row
+
+
+def _backfill_ids(rows: list[dict]) -> bool:
+    changed = False
+    for row in rows:
+        if not row.get("id"):
+            row["id"] = uuid4().hex
+            changed = True
+    return changed
 
 
 def _transaction_to_dict(transaction: Transaction) -> dict:

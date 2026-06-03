@@ -26,6 +26,4 @@ def overview_transactions(
     user_id: int = Depends(current_user_id),
 ) -> list[TransactionResponse]:
     records = transactions_use_case.across_portfolios(symbol=symbol, user_id=user_id)
-    return [
-        TransactionResponse.from_transaction(r.transaction, portfolio=r.portfolio) for r in records
-    ]
+    return [TransactionResponse.from_record(r) for r in records]

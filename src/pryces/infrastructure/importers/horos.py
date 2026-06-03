@@ -135,8 +135,13 @@ class HorosFundsImporter(TransactionImporter):
 
     @staticmethod
     def _rows(content: bytes) -> list[list[str]]:
+        # can_parse must never raise: a binary file (e.g. an .xls being
+        # auto-detected) decodes to garbage that csv.reader chokes on.
         text = content.decode("utf-8", errors="ignore")
-        return list(csv.reader(io.StringIO(text), delimiter=_DELIMITER))
+        try:
+            return list(csv.reader(io.StringIO(text), delimiter=_DELIMITER))
+        except csv.Error:
+            return []
 
     @classmethod
     def _header_columns(cls, rows: list[list[str]]) -> dict[str, int] | None:
