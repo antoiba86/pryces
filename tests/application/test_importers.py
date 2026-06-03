@@ -33,6 +33,21 @@ class _StubImporter:
         return ImportResult(transactions=())
 
 
+class _RaisingImporter:
+    def __init__(self, broker_id):
+        self._broker_id = broker_id
+
+    @property
+    def broker_id(self):
+        return self._broker_id
+
+    def can_parse(self, content):
+        raise ValueError("boom")
+
+    def parse(self, content):
+        return ImportResult(transactions=())
+
+
 def _registry(importers):
     return ImporterRegistry(importers, _StubLoggerFactory())
 
@@ -57,6 +72,15 @@ class TestImporterRegistry:
         registry = _registry([_StubImporter("degiro", parseable=False)])
 
         assert registry.auto_detect("anything") is None
+
+    def test_auto_detect_skips_importer_whose_can_parse_raises(self):
+        # A bad upload must not 500 the import — a raising can_parse is treated
+        # as "not this importer" and detection continues.
+        boom = _RaisingImporter("ibkr")
+        good = _StubImporter("renta4", parseable=True)
+        registry = _registry([boom, good])
+
+        assert registry.auto_detect("anything") is good
 
     def test_get_resolves_by_broker_id(self):
         json_importer = _StubImporter("json", parseable=False)

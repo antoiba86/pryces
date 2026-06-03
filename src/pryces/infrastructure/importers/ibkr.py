@@ -154,7 +154,12 @@ class IbkrActivityImporter(TransactionImporter):
 
     @staticmethod
     def _rows(content: str) -> list[list[str]]:
-        return list(csv.reader(io.StringIO(content)))
+        # can_parse must never raise: a binary file (e.g. an .xls being
+        # auto-detected) decodes to garbage that csv.reader chokes on.
+        try:
+            return list(csv.reader(io.StringIO(content)))
+        except csv.Error:
+            return []
 
 
 def _synthesize_id(fields: dict[str, str]) -> str:

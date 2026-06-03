@@ -27,7 +27,14 @@ class ImporterRegistry:
 
     def auto_detect(self, content: bytes) -> TransactionImporter | None:
         for importer in self._importers:
-            if importer.can_parse(content):
+            # can_parse should never raise, but a bad file shouldn't 500 the
+            # import: treat any failure as "not this importer" and move on.
+            try:
+                matched = importer.can_parse(content)
+            except Exception as error:
+                self._logger.warning(f"can_parse failed for {importer.broker_id}: {error}")
+                continue
+            if matched:
                 self._logger.info(f"Auto-detected importer: {importer.broker_id}")
                 return importer
         self._logger.warning("No importer could parse the supplied content")
