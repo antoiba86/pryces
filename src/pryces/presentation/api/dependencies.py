@@ -84,7 +84,10 @@ def get_stock_provider(
     logger_factory: LoggerFactory = Depends(get_logger_factory),
 ) -> StockProvider:
     return CachedStockProvider(
-        _build_yahoo_stock_provider(logger_factory), _get_stock_cache(), logger_factory
+        _build_yahoo_stock_provider(logger_factory),
+        _get_stock_cache(),
+        logger_factory,
+        closed_ttl_seconds=SettingsFactory.create_closed_market_cache_settings().ttl_seconds,
     )
 
 

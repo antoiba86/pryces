@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from pryces.domain.stocks import Currency, Stock
+from pryces.domain.stocks import Currency, MarketState, Stock
 from pryces.infrastructure.caching import (
     CachedFxRateProvider,
     CachedStockProvider,
@@ -12,8 +12,8 @@ from pryces.infrastructure.caching import (
 )
 
 
-def _stock(symbol: str, price: str = "100") -> Stock:
-    return Stock(symbol=symbol, current_price=Decimal(price))
+def _stock(symbol: str, price: str = "100", market_state: MarketState | None = None) -> Stock:
+    return Stock(symbol=symbol, current_price=Decimal(price), market_state=market_state)
 
 
 class FakeClock:
@@ -77,6 +77,20 @@ class TestTtlCache:
         cache.put("a", 1)
         cache.clear()
         assert cache.get("a") is None
+
+    def test_per_entry_ttl_overrides_default(self):
+        clock = FakeClock()
+        cache: TtlCache[str, int] = TtlCache(ttl_seconds=10, clock=clock)
+        cache.put("short", 1)  # default TTL of 10
+        cache.put("long", 2, ttl_seconds=100)
+        clock.advance(50)
+        assert cache.get("short") is None  # default TTL elapsed
+        assert cache.get("long") == 2  # longer per-entry TTL still valid
+
+    def test_disabled_cache_ignores_per_entry_ttl(self):
+        cache: TtlCache[str, int] = TtlCache(ttl_seconds=0)
+        cache.put("a", 1, ttl_seconds=1000)
+        assert cache.get("a") is None  # ttl=0 is a global kill switch
 
 
 class TestCachedStockProvider:
@@ -161,6 +175,56 @@ class TestCachedStockProvider:
 
         assert bypassed[0].current_price == Decimal("200")
         assert cached_after[0].current_price == Decimal("200")  # cache was refreshed
+        assert inner.calls == [["AAPL"], ["AAPL"]]
+
+    def test_closed_market_quote_uses_the_longer_ttl(self):
+        clock = FakeClock()
+        inner = RecordingStockProvider({"AAPL": _stock("AAPL", market_state=MarketState.CLOSED)})
+        provider = CachedStockProvider(
+            inner,
+            TtlCache(ttl_seconds=300, clock=clock),
+            Mock(),
+            closed_ttl_seconds=3600,
+        )
+
+        provider.get_stocks(["AAPL"])
+        clock.advance(300)  # past the short TTL...
+        provider.get_stocks(["AAPL"])  # ...but the market is closed, so still cached
+        clock.advance(3300)  # now past the closed TTL (3600 total)
+        provider.get_stocks(["AAPL"])
+
+        assert inner.calls == [["AAPL"], ["AAPL"]]  # one fetch, then one after the long TTL
+
+    def test_open_market_quote_uses_the_short_ttl(self):
+        clock = FakeClock()
+        inner = RecordingStockProvider({"AAPL": _stock("AAPL", market_state=MarketState.OPEN)})
+        provider = CachedStockProvider(
+            inner,
+            TtlCache(ttl_seconds=300, clock=clock),
+            Mock(),
+            closed_ttl_seconds=3600,
+        )
+
+        provider.get_stocks(["AAPL"])
+        clock.advance(300)  # short TTL elapsed; an open market must be re-fetched
+        provider.get_stocks(["AAPL"])
+
+        assert inner.calls == [["AAPL"], ["AAPL"]]
+
+    def test_extended_hours_quote_uses_the_short_ttl(self):
+        clock = FakeClock()
+        inner = RecordingStockProvider({"AAPL": _stock("AAPL", market_state=MarketState.POST)})
+        provider = CachedStockProvider(
+            inner,
+            TtlCache(ttl_seconds=300, clock=clock),
+            Mock(),
+            closed_ttl_seconds=3600,
+        )
+
+        provider.get_stocks(["AAPL"])
+        clock.advance(300)  # POST-market prices still move, so no long TTL
+        provider.get_stocks(["AAPL"])
+
         assert inner.calls == [["AAPL"], ["AAPL"]]
 
 

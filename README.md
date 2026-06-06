@@ -103,6 +103,7 @@ Edit `.env` with your settings:
 | `MAX_FETCH_WORKERS` | Maximum number of concurrent workers for fetching stock data (values above 6 are not recommended on low-resource systems) |
 | `LOGS_DIRECTORY` | Directory path for log file output (use `/tmp` if you don't need persistent logs) |
 | `CACHE_TTL_SECONDS` | Optional. How long (seconds) live stock quotes are cached so repeated API calls don't re-hit Yahoo Finance. Defaults to `300` (5 minutes); set `0` to disable |
+| `CACHE_CLOSED_TTL_SECONDS` | Optional. Longer cache (seconds) for quotes whose exchange is closed — the price is frozen until it reopens, so there's no point re-fetching every few minutes overnight, on weekends, or on holidays. Defaults to `3600` (1 hour) |
 | `CACHE_FX_TTL_SECONDS` | Optional. How long (seconds) FX rates are cached. They move slowly, so this defaults to `3600` (1 hour); set `0` to disable |
 
 The application loads these variables automatically from `.env` on startup via `python-dotenv`.

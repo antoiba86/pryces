@@ -8,11 +8,14 @@ from decimal import Decimal
 from typing import Generic, TypeVar
 
 from ..application.interfaces import FxRateProvider, LoggerFactory, StockProvider
-from ..domain.stocks import Currency, Stock
+from ..domain.stocks import Currency, MarketState, Stock
 
-# Quotes move every tick; FX is far steadier, so it gets a much longer TTL.
+# Quotes move every tick; FX is far steadier, so it gets a much longer TTL. When an
+# exchange is closed (nights, weekends, holidays) the price won't change until it
+# reopens, so closed-market quotes are held far longer to avoid pointless calls.
 DEFAULT_CACHE_TTL_SECONDS = 300
 DEFAULT_FX_CACHE_TTL_SECONDS = 3600
+DEFAULT_CLOSED_CACHE_TTL_SECONDS = 3600
 
 K = TypeVar("K", bound=Hashable)
 V = TypeVar("V")
@@ -30,17 +33,19 @@ class CacheSettings:
 class TtlCache(Generic[K, V]):
     """A small thread-safe, time-to-live key/value store.
 
-    Entries expire `ttl_seconds` after they are written; a TTL of 0 disables
-    caching (every read misses). The clock is injectable for deterministic
-    tests and defaults to a monotonic clock so wall-clock changes can't skew
-    expiry. One instance is shared process-wide (see `dependencies.py`) so the
-    cache survives across requests.
+    Entries expire `ttl_seconds` after they are written; `put` may override that
+    per entry (e.g. a longer life for data known not to change soon). A default
+    TTL of 0 disables caching entirely (every read misses), acting as a global
+    kill switch regardless of per-entry overrides. The clock is injectable for
+    deterministic tests and defaults to a monotonic clock so wall-clock changes
+    can't skew expiry. One instance is shared process-wide (see
+    `dependencies.py`) so the cache survives across requests.
     """
 
     def __init__(self, ttl_seconds: int, clock: Callable[[], float] = time.monotonic) -> None:
         self._ttl = ttl_seconds
         self._clock = clock
-        self._entries: dict[K, tuple[float, V]] = {}
+        self._entries: dict[K, tuple[float, V]] = {}  # key -> (expires_at, value)
         self._lock = threading.Lock()
 
     def get(self, key: K) -> V | None:
@@ -50,17 +55,20 @@ class TtlCache(Generic[K, V]):
             entry = self._entries.get(key)
             if entry is None:
                 return None
-            stored_at, value = entry
-            if self._clock() - stored_at >= self._ttl:
+            expires_at, value = entry
+            if self._clock() >= expires_at:
                 del self._entries[key]
                 return None
             return value
 
-    def put(self, key: K, value: V) -> None:
+    def put(self, key: K, value: V, ttl_seconds: int | None = None) -> None:
         if self._ttl <= 0:
             return
+        ttl = self._ttl if ttl_seconds is None else ttl_seconds
+        if ttl <= 0:
+            return
         with self._lock:
-            self._entries[key] = (self._clock(), value)
+            self._entries[key] = (self._clock() + ttl, value)
 
     def clear(self) -> None:
         with self._lock:
@@ -77,6 +85,13 @@ class CachedStockProvider(StockProvider):
     batch and recorded. Symbols the inner provider can't resolve are left
     uncached so they're retried next time rather than pinned as failures.
 
+    A quote whose `market_state` is CLOSED won't change until the exchange
+    reopens, so it is cached with `closed_ttl_seconds` (typically much longer)
+    instead of the short default — this is what stops needless calls overnight,
+    on weekends, and on holidays, per-exchange, using the state Yahoo already
+    reports. Quotes in extended hours (PRE/POST) still move, so they keep the
+    short TTL.
+
     Pass `use_cache=False` to bypass the cache for that call: missing-and-stale
     symbols are fetched fresh and the cache is refreshed with the results.
     """
@@ -86,10 +101,12 @@ class CachedStockProvider(StockProvider):
         inner: StockProvider,
         cache: TtlCache[str, Stock],
         logger_factory: LoggerFactory,
+        closed_ttl_seconds: int = DEFAULT_CLOSED_CACHE_TTL_SECONDS,
     ) -> None:
         self._inner = inner
         self._cache = cache
         self._logger = logger_factory.get_logger(__name__)
+        self._closed_ttl = closed_ttl_seconds
 
     def get_stocks(self, symbols: list[str], use_cache: bool = True) -> list[Stock]:
         if not symbols:
@@ -108,7 +125,8 @@ class CachedStockProvider(StockProvider):
             self._logger.debug(f"Cache miss for {len(missing)}/{len(symbols)} symbols; fetching")
             fetched = {stock.symbol.upper(): stock for stock in self._inner.get_stocks(missing)}
             for stock in fetched.values():
-                self._cache.put(stock.symbol.upper(), stock)
+                ttl = self._closed_ttl if stock.market_state == MarketState.CLOSED else None
+                self._cache.put(stock.symbol.upper(), stock, ttl)
             for symbol in missing:
                 stock = fetched.get(symbol.upper())
                 if stock is not None:

@@ -70,6 +70,21 @@ class TestCreateCacheSettings:
             SettingsFactory.create_cache_settings()
 
 
+class TestCreateClosedMarketCacheSettings:
+    def test_defaults_to_one_hour_when_unset(self, monkeypatch):
+        monkeypatch.delenv("CACHE_CLOSED_TTL_SECONDS", raising=False)
+        assert SettingsFactory.create_closed_market_cache_settings().ttl_seconds == 3600
+
+    def test_reads_override(self, monkeypatch):
+        monkeypatch.setenv("CACHE_CLOSED_TTL_SECONDS", "86400")
+        assert SettingsFactory.create_closed_market_cache_settings().ttl_seconds == 86400
+
+    def test_non_integer_raises(self, monkeypatch):
+        monkeypatch.setenv("CACHE_CLOSED_TTL_SECONDS", "abc")
+        with pytest.raises(ConfigurationError):
+            SettingsFactory.create_closed_market_cache_settings()
+
+
 class TestCreateFxCacheSettings:
     def test_defaults_to_one_hour_when_unset(self, monkeypatch):
         monkeypatch.delenv("CACHE_FX_TTL_SECONDS", raising=False)

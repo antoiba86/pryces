@@ -2,6 +2,7 @@ import os
 
 from .caching import (
     DEFAULT_CACHE_TTL_SECONDS,
+    DEFAULT_CLOSED_CACHE_TTL_SECONDS,
     DEFAULT_FX_CACHE_TTL_SECONDS,
     CacheSettings,
 )
@@ -54,6 +55,16 @@ class SettingsFactory:
         # Live stock quotes: short TTL (default 5 minutes).
         return CacheSettings(
             ttl_seconds=SettingsFactory._read_ttl("CACHE_TTL_SECONDS", DEFAULT_CACHE_TTL_SECONDS)
+        )
+
+    @staticmethod
+    def create_closed_market_cache_settings() -> CacheSettings:
+        # Quotes for a closed exchange: long TTL (default 1 hour) — the price is
+        # frozen until it reopens, so there's no point re-fetching often.
+        return CacheSettings(
+            ttl_seconds=SettingsFactory._read_ttl(
+                "CACHE_CLOSED_TTL_SECONDS", DEFAULT_CLOSED_CACHE_TTL_SECONDS
+            )
         )
 
     @staticmethod
