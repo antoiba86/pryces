@@ -56,6 +56,21 @@ class TestYahooFinanceMapper:
         assert stock.price_delay_in_minutes == 0
         assert stock.kind == InstrumentType.STOCK
 
+    def test_passes_next_market_open_through(self, mapper):
+        from datetime import datetime, timezone
+
+        open_at = datetime(2026, 6, 8, 14, 0, tzinfo=timezone.utc)
+        stock = mapper.map("AAPL", _build_full_info(), next_market_open=open_at)
+
+        assert stock is not None
+        assert stock.next_market_open == open_at
+
+    def test_next_market_open_defaults_to_none(self, mapper):
+        stock = mapper.map("AAPL", _build_full_info())
+
+        assert stock is not None
+        assert stock.next_market_open is None
+
     def test_returns_none_for_empty_info(self, mapper):
         assert mapper.map("AAPL", {}) is None
 
@@ -241,6 +256,44 @@ class TestYahooFinanceMapper:
 
         assert stock is not None
         assert stock.currency == expected_currency
+
+
+class TestYahooFinanceProviderNextOpen:
+    def _provider(self, fetcher):
+        from pryces.infrastructure.providers import YahooFinanceProvider, YahooFinanceSettings
+
+        return YahooFinanceProvider(
+            settings=YahooFinanceSettings(max_workers=1, extra_delay_in_minutes=0),
+            logger_factory=Mock(),
+            next_open_fetcher=fetcher,
+        )
+
+    def test_fetches_next_open_only_when_market_closed(self):
+        from datetime import datetime, timezone
+
+        open_at = datetime(2026, 6, 8, 14, 0, tzinfo=timezone.utc)
+        fetcher = Mock(return_value=open_at)
+        provider = self._provider(fetcher)
+
+        ticker = Mock()
+        ticker.info = _build_full_info(marketState="CLOSED")
+        with patch("pryces.infrastructure.providers.yf.Ticker", return_value=ticker):
+            stocks = provider.get_stocks(["AAPL"])
+
+        fetcher.assert_called_once_with("AAPL")
+        assert stocks[0].next_market_open == open_at
+
+    def test_skips_next_open_fetch_during_regular_hours(self):
+        fetcher = Mock()
+        provider = self._provider(fetcher)
+
+        ticker = Mock()
+        ticker.info = _build_full_info(marketState="REGULAR")
+        with patch("pryces.infrastructure.providers.yf.Ticker", return_value=ticker):
+            stocks = provider.get_stocks(["AAPL"])
+
+        fetcher.assert_not_called()
+        assert stocks[0].next_market_open is None
 
 
 class TestMapCurrency:

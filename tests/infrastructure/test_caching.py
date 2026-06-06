@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import Mock
 
@@ -11,9 +12,21 @@ from pryces.infrastructure.caching import (
     TtlCache,
 )
 
+_NOW = datetime(2026, 6, 8, 13, 55, tzinfo=timezone.utc)  # a Monday, 5 min before a 14:00 open
 
-def _stock(symbol: str, price: str = "100", market_state: MarketState | None = None) -> Stock:
-    return Stock(symbol=symbol, current_price=Decimal(price), market_state=market_state)
+
+def _stock(
+    symbol: str,
+    price: str = "100",
+    market_state: MarketState | None = None,
+    next_market_open: datetime | None = None,
+) -> Stock:
+    return Stock(
+        symbol=symbol,
+        current_price=Decimal(price),
+        market_state=market_state,
+        next_market_open=next_market_open,
+    )
 
 
 class FakeClock:
@@ -210,6 +223,60 @@ class TestCachedStockProvider:
         provider.get_stocks(["AAPL"])
 
         assert inner.calls == [["AAPL"], ["AAPL"]]
+
+    def test_closed_quote_is_capped_to_next_open(self):
+        # Fetched 5 min before the open: the long closed TTL must be clamped so the
+        # entry expires at the open, not ~an hour into the live session.
+        clock = FakeClock()
+        inner = RecordingStockProvider(
+            {
+                "BME": _stock(
+                    "BME",
+                    market_state=MarketState.CLOSED,
+                    next_market_open=_NOW + timedelta(minutes=5),
+                )
+            }
+        )
+        provider = CachedStockProvider(
+            inner,
+            TtlCache(ttl_seconds=300, clock=clock),
+            Mock(),
+            closed_ttl_seconds=3600,
+            now=lambda: _NOW,
+        )
+
+        provider.get_stocks(["BME"])
+        clock.advance(299)  # just before the open — still cached
+        provider.get_stocks(["BME"])
+        clock.advance(1)  # market has opened (300s) — entry expired, must re-fetch
+        provider.get_stocks(["BME"])
+
+        assert inner.calls == [["BME"], ["BME"]]
+
+    def test_next_open_in_the_past_falls_back_to_closed_ttl(self):
+        clock = FakeClock()
+        inner = RecordingStockProvider(
+            {
+                "BME": _stock(
+                    "BME",
+                    market_state=MarketState.CLOSED,
+                    next_market_open=_NOW - timedelta(hours=1),
+                )
+            }
+        )
+        provider = CachedStockProvider(
+            inner,
+            TtlCache(ttl_seconds=300, clock=clock),
+            Mock(),
+            closed_ttl_seconds=3600,
+            now=lambda: _NOW,
+        )
+
+        provider.get_stocks(["BME"])
+        clock.advance(300)  # past the short TTL but within the 1h closed fallback
+        provider.get_stocks(["BME"])
+
+        assert inner.calls == [["BME"]]  # served from cache; stale next-open ignored
 
     def test_extended_hours_quote_uses_the_short_ttl(self):
         clock = FakeClock()

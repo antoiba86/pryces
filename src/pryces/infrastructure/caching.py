@@ -4,6 +4,7 @@ import threading
 import time
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Generic, TypeVar
 
@@ -92,6 +93,11 @@ class CachedStockProvider(StockProvider):
     reports. Quotes in extended hours (PRE/POST) still move, so they keep the
     short TTL.
 
+    When the quote also carries `next_market_open`, the closed TTL is capped so
+    the entry expires no later than the reopen — otherwise a fetch shortly before
+    the open would serve a frozen price for up to `closed_ttl_seconds` into the
+    live session.
+
     Pass `use_cache=False` to bypass the cache for that call: missing-and-stale
     symbols are fetched fresh and the cache is refreshed with the results.
     """
@@ -102,11 +108,13 @@ class CachedStockProvider(StockProvider):
         cache: TtlCache[str, Stock],
         logger_factory: LoggerFactory,
         closed_ttl_seconds: int = DEFAULT_CLOSED_CACHE_TTL_SECONDS,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         self._inner = inner
         self._cache = cache
         self._logger = logger_factory.get_logger(__name__)
         self._closed_ttl = closed_ttl_seconds
+        self._now = now
 
     def get_stocks(self, symbols: list[str], use_cache: bool = True) -> list[Stock]:
         if not symbols:
@@ -125,8 +133,7 @@ class CachedStockProvider(StockProvider):
             self._logger.debug(f"Cache miss for {len(missing)}/{len(symbols)} symbols; fetching")
             fetched = {stock.symbol.upper(): stock for stock in self._inner.get_stocks(missing)}
             for stock in fetched.values():
-                ttl = self._closed_ttl if stock.market_state == MarketState.CLOSED else None
-                self._cache.put(stock.symbol.upper(), stock, ttl)
+                self._cache.put(stock.symbol.upper(), stock, self._ttl_for(stock))
             for symbol in missing:
                 stock = fetched.get(symbol.upper())
                 if stock is not None:
@@ -135,6 +142,18 @@ class CachedStockProvider(StockProvider):
         # Preserve the caller's order and drop unresolved symbols, matching the
         # inner provider's contract (omits symbols with no data).
         return [resolved[symbol] for symbol in symbols if symbol in resolved]
+
+    def _ttl_for(self, stock: Stock) -> int | None:
+        # Open/extended-hours quotes use the cache's short default (None = default).
+        if stock.market_state != MarketState.CLOSED:
+            return None
+        # Closed: hold long, but never past the reopen if we know when that is.
+        if stock.next_market_open is None:
+            return self._closed_ttl
+        seconds_to_open = int((stock.next_market_open - self._now()).total_seconds())
+        if seconds_to_open <= 0:
+            return self._closed_ttl
+        return min(self._closed_ttl, seconds_to_open)
 
 
 class CachedFxRateProvider(FxRateProvider):

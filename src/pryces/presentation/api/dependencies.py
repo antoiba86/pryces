@@ -73,10 +73,15 @@ def _get_fx_cache() -> TtlCache[tuple[Currency, Currency], Decimal]:
     return _fx_cache
 
 
-def _build_yahoo_stock_provider(logger_factory: LoggerFactory) -> YahooFinanceProvider:
+def _build_yahoo_stock_provider(
+    logger_factory: LoggerFactory, with_next_open: bool = True
+) -> YahooFinanceProvider:
+    # The FX provider doesn't use next-open times, so it disables that extra
+    # metadata call (`with_next_open=False`) to avoid paying for it on FX pairs.
     return YahooFinanceProvider(
         settings=SettingsFactory.create_yahoo_finance_settings(),
         logger_factory=logger_factory,
+        next_open_fetcher=None if with_next_open else (lambda symbol: None),
     )
 
 
@@ -97,7 +102,8 @@ def get_fx_provider(
     # The FX provider fetches `EURUSD=X`-style pairs through a StockProvider; give it
     # the *uncached* one so FX rates live only in the FX cache (at the FX TTL), not
     # also in the shorter-lived quote cache.
-    inner = YahooFinanceFxProvider(_build_yahoo_stock_provider(logger_factory), logger_factory)
+    raw_stock_provider = _build_yahoo_stock_provider(logger_factory, with_next_open=False)
+    inner = YahooFinanceFxProvider(raw_stock_provider, logger_factory)
     return CachedFxRateProvider(inner, _get_fx_cache(), logger_factory)
 
 
