@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pandas as pd
@@ -47,7 +47,9 @@ class YahooFinanceMapper:
         self._extra_delay_in_minutes = extra_delay_in_minutes
         self._logger = logger_factory.get_logger(__name__)
 
-    def map(self, symbol: str, info: dict) -> Stock | None:
+    def map(
+        self, symbol: str, info: dict, next_market_open: datetime | None = None
+    ) -> Stock | None:
         # yfinance returns a small metadata-only dict (≤3 keys) for invalid/delisted symbols.
         # FX pairs legitimately return small dicts, so let CURRENCY quoteType through.
         if not info or (len(info) <= 3 and info.get("quoteType") != "CURRENCY"):
@@ -64,9 +66,15 @@ class YahooFinanceMapper:
             self._logger.error(f"Unable to retrieve current price for symbol: {symbol}")
             return None
 
-        return self._to_stock(symbol, info, current_price)
+        return self._to_stock(symbol, info, current_price, next_market_open)
 
-    def _to_stock(self, symbol: str, info: dict, current_price: float) -> Stock:
+    def _to_stock(
+        self,
+        symbol: str,
+        info: dict,
+        current_price: float,
+        next_market_open: datetime | None = None,
+    ) -> Stock:
         previous_close = info.get("previousClose")
         open_price = info.get("open")
         day_high = info.get("dayHigh")
@@ -106,6 +114,7 @@ class YahooFinanceMapper:
             ),
             market_cap=Decimal(str(market_cap)) if market_cap is not None else None,
             market_state=market_state,
+            next_market_open=next_market_open,
             price_delay_in_minutes=price_delay_in_minutes,
             kind=kind,
         )
@@ -142,25 +151,44 @@ class YahooFinanceMapper:
                 return None
 
 
+# Resolves the (UTC) time a symbol's regular session next opens, or None if it
+# can't be determined. Only consulted for closed markets, to bound caching.
+NextMarketOpenFetcher = Callable[[str], "datetime | None"]
+
+
 class YahooFinanceProvider(StockProvider):
-    def __init__(self, settings: YahooFinanceSettings, logger_factory: LoggerFactory) -> None:
+    def __init__(
+        self,
+        settings: YahooFinanceSettings,
+        logger_factory: LoggerFactory,
+        next_open_fetcher: NextMarketOpenFetcher | None = None,
+    ) -> None:
         self._max_workers = settings.max_workers
         self._mapper = YahooFinanceMapper(settings.extra_delay_in_minutes, logger_factory)
         self._logger = logger_factory.get_logger(__name__)
+        self._next_open_fetcher = (
+            next_open_fetcher if next_open_fetcher is not None else _yahoo_next_market_open
+        )
 
     def _get_stock(self, symbol: str) -> Stock | None:
         try:
             self._logger.debug(f"Fetching stock data for {symbol}")
             ticker_obj = yf.Ticker(symbol)
             info = ticker_obj.info
-            stock = self._mapper.map(symbol, info)
+            # Only closed markets need the next-open time, so we pay the extra
+            # metadata call only then — never during regular/extended hours.
+            next_open = (
+                self._next_open_fetcher(symbol) if info.get("marketState") == "CLOSED" else None
+            )
+            stock = self._mapper.map(symbol, info, next_open)
             del info, ticker_obj
             return stock
         except Exception as e:
             self._logger.error(f"Error fetching data for {symbol}: {e}")
             return None
 
-    def get_stocks(self, symbols: list[str]) -> list[Stock]:
+    def get_stocks(self, symbols: list[str], use_cache: bool = True) -> list[Stock]:
+        # Always fetches live; `use_cache` is honoured by CachedStockProvider, not here.
         if not symbols:
             return []
 
@@ -318,3 +346,21 @@ def _yahoo_price_history(symbol: str, start: date) -> dict[date, Decimal]:
         for timestamp, close in history["Close"].items()
         if close == close  # skip NaN
     }
+
+
+def _yahoo_next_market_open(symbol: str) -> datetime | None:
+    # Yahoo's chart metadata reports the current/next session as epoch seconds in
+    # `currentTradingPeriod.regular.start`. We only treat it as a "next open" when
+    # it's in the future (the pre-open window); a past start means we're in/after a
+    # session, so the caller falls back to its default closed TTL. Any failure or
+    # missing field yields None rather than raising.
+    try:
+        metadata = yf.Ticker(symbol).get_history_metadata()
+    except Exception:
+        return None
+    period = (metadata or {}).get("currentTradingPeriod", {})
+    start = period.get("regular", {}).get("start") if isinstance(period, dict) else None
+    if not isinstance(start, (int, float)):
+        return None
+    open_at = datetime.fromtimestamp(start, tz=timezone.utc)
+    return open_at if open_at > datetime.now(timezone.utc) else None

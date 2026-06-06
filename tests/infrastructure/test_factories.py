@@ -42,6 +42,73 @@ class TestCreateYahooFinanceSettings:
         assert settings.max_workers == 0
 
 
+class TestCreateCacheSettings:
+    def test_defaults_to_five_minutes_when_unset(self, monkeypatch):
+        monkeypatch.delenv("CACHE_TTL_SECONDS", raising=False)
+        assert SettingsFactory.create_cache_settings().ttl_seconds == 300
+
+    def test_defaults_when_empty_string(self, monkeypatch):
+        monkeypatch.setenv("CACHE_TTL_SECONDS", "")
+        assert SettingsFactory.create_cache_settings().ttl_seconds == 300
+
+    def test_reads_override(self, monkeypatch):
+        monkeypatch.setenv("CACHE_TTL_SECONDS", "60")
+        assert SettingsFactory.create_cache_settings().ttl_seconds == 60
+
+    def test_zero_disables_caching(self, monkeypatch):
+        monkeypatch.setenv("CACHE_TTL_SECONDS", "0")
+        assert SettingsFactory.create_cache_settings().ttl_seconds == 0
+
+    def test_non_integer_raises(self, monkeypatch):
+        monkeypatch.setenv("CACHE_TTL_SECONDS", "abc")
+        with pytest.raises(ConfigurationError):
+            SettingsFactory.create_cache_settings()
+
+    def test_negative_raises(self, monkeypatch):
+        monkeypatch.setenv("CACHE_TTL_SECONDS", "-5")
+        with pytest.raises(ConfigurationError):
+            SettingsFactory.create_cache_settings()
+
+
+class TestCreateClosedMarketCacheSettings:
+    def test_defaults_to_one_hour_when_unset(self, monkeypatch):
+        monkeypatch.delenv("CACHE_CLOSED_TTL_SECONDS", raising=False)
+        assert SettingsFactory.create_closed_market_cache_settings().ttl_seconds == 3600
+
+    def test_reads_override(self, monkeypatch):
+        monkeypatch.setenv("CACHE_CLOSED_TTL_SECONDS", "86400")
+        assert SettingsFactory.create_closed_market_cache_settings().ttl_seconds == 86400
+
+    def test_non_integer_raises(self, monkeypatch):
+        monkeypatch.setenv("CACHE_CLOSED_TTL_SECONDS", "abc")
+        with pytest.raises(ConfigurationError):
+            SettingsFactory.create_closed_market_cache_settings()
+
+
+class TestCreateFxCacheSettings:
+    def test_defaults_to_one_hour_when_unset(self, monkeypatch):
+        monkeypatch.delenv("CACHE_FX_TTL_SECONDS", raising=False)
+        assert SettingsFactory.create_fx_cache_settings().ttl_seconds == 3600
+
+    def test_reads_override(self, monkeypatch):
+        monkeypatch.setenv("CACHE_FX_TTL_SECONDS", "120")
+        assert SettingsFactory.create_fx_cache_settings().ttl_seconds == 120
+
+    def test_zero_disables_caching(self, monkeypatch):
+        monkeypatch.setenv("CACHE_FX_TTL_SECONDS", "0")
+        assert SettingsFactory.create_fx_cache_settings().ttl_seconds == 0
+
+    def test_non_integer_raises(self, monkeypatch):
+        monkeypatch.setenv("CACHE_FX_TTL_SECONDS", "abc")
+        with pytest.raises(ConfigurationError):
+            SettingsFactory.create_fx_cache_settings()
+
+    def test_negative_raises(self, monkeypatch):
+        monkeypatch.setenv("CACHE_FX_TTL_SECONDS", "-5")
+        with pytest.raises(ConfigurationError):
+            SettingsFactory.create_fx_cache_settings()
+
+
 class TestCreateTelegramSettings:
     def test_happy_path(self, monkeypatch):
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token123")

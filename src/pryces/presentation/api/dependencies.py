@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import Depends
 
 from ...application.importers import ImporterRegistry
@@ -24,6 +26,8 @@ from ...application.use_cases.manage_transactions import (
     DeleteTransaction,
     UpdateTransaction,
 )
+from ...domain.stocks import Currency, Stock
+from ...infrastructure.caching import CachedFxRateProvider, CachedStockProvider, TtlCache
 from ...infrastructure.factories import SettingsFactory
 from ...infrastructure.fx import YahooFinanceFxProvider, YahooFinanceHistoricalFxProvider
 from ...infrastructure.importers.degiro import DegiroCsvImporter
@@ -47,20 +51,60 @@ def get_portfolio_repository() -> PortfolioRepository:
     return JsonPortfolioRepository()
 
 
-def get_stock_provider(
-    logger_factory: LoggerFactory = Depends(get_logger_factory),
-) -> StockProvider:
+# Process-wide caches. `Depends` rebuilds the provider every request, so the cache
+# stores must live outside them to survive across requests; built lazily so the TTL
+# env vars are read on first use, not at import time. Quotes use a short TTL; FX rates
+# a much longer one (they barely move within an hour).
+_stock_cache: TtlCache[str, Stock] | None = None
+_fx_cache: TtlCache[tuple[Currency, Currency], Decimal] | None = None
+
+
+def _get_stock_cache() -> TtlCache[str, Stock]:
+    global _stock_cache
+    if _stock_cache is None:
+        _stock_cache = TtlCache(SettingsFactory.create_cache_settings().ttl_seconds)
+    return _stock_cache
+
+
+def _get_fx_cache() -> TtlCache[tuple[Currency, Currency], Decimal]:
+    global _fx_cache
+    if _fx_cache is None:
+        _fx_cache = TtlCache(SettingsFactory.create_fx_cache_settings().ttl_seconds)
+    return _fx_cache
+
+
+def _build_yahoo_stock_provider(
+    logger_factory: LoggerFactory, with_next_open: bool = True
+) -> YahooFinanceProvider:
+    # The FX provider doesn't use next-open times, so it disables that extra
+    # metadata call (`with_next_open=False`) to avoid paying for it on FX pairs.
     return YahooFinanceProvider(
         settings=SettingsFactory.create_yahoo_finance_settings(),
         logger_factory=logger_factory,
+        next_open_fetcher=None if with_next_open else (lambda symbol: None),
+    )
+
+
+def get_stock_provider(
+    logger_factory: LoggerFactory = Depends(get_logger_factory),
+) -> StockProvider:
+    return CachedStockProvider(
+        _build_yahoo_stock_provider(logger_factory),
+        _get_stock_cache(),
+        logger_factory,
+        closed_ttl_seconds=SettingsFactory.create_closed_market_cache_settings().ttl_seconds,
     )
 
 
 def get_fx_provider(
-    stock_provider: StockProvider = Depends(get_stock_provider),
     logger_factory: LoggerFactory = Depends(get_logger_factory),
 ) -> FxRateProvider:
-    return YahooFinanceFxProvider(stock_provider, logger_factory)
+    # The FX provider fetches `EURUSD=X`-style pairs through a StockProvider; give it
+    # the *uncached* one so FX rates live only in the FX cache (at the FX TTL), not
+    # also in the shorter-lived quote cache.
+    raw_stock_provider = _build_yahoo_stock_provider(logger_factory, with_next_open=False)
+    inner = YahooFinanceFxProvider(raw_stock_provider, logger_factory)
+    return CachedFxRateProvider(inner, _get_fx_cache(), logger_factory)
 
 
 def get_historical_fx_provider(

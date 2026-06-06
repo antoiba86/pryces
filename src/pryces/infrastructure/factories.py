@@ -1,5 +1,11 @@
 import os
 
+from .caching import (
+    DEFAULT_CACHE_TTL_SECONDS,
+    DEFAULT_CLOSED_CACHE_TTL_SECONDS,
+    DEFAULT_FX_CACHE_TTL_SECONDS,
+    CacheSettings,
+)
 from .exceptions import ConfigurationError
 from .logging import (
     BOT_ENTRY_POINT,
@@ -27,6 +33,48 @@ class SettingsFactory:
                 f"Invalid value for MAX_FETCH_WORKERS: '{os.environ.get('MAX_FETCH_WORKERS')}'"
                 f" — expected an integer"
             ) from e
+
+    @staticmethod
+    def _read_ttl(env_var: str, default: int) -> int:
+        # Optional TTL env var. Unset/blank → default; a TTL of 0 disables caching.
+        raw = os.environ.get(env_var)
+        if raw is None or raw.strip() == "":
+            return default
+        try:
+            ttl = int(raw)
+        except ValueError as e:
+            raise ConfigurationError(
+                f"Invalid value for {env_var}: '{raw}' — expected an integer"
+            ) from e
+        if ttl < 0:
+            raise ConfigurationError(f"{env_var} must be a non-negative integer")
+        return ttl
+
+    @staticmethod
+    def create_cache_settings() -> CacheSettings:
+        # Live stock quotes: short TTL (default 5 minutes).
+        return CacheSettings(
+            ttl_seconds=SettingsFactory._read_ttl("CACHE_TTL_SECONDS", DEFAULT_CACHE_TTL_SECONDS)
+        )
+
+    @staticmethod
+    def create_closed_market_cache_settings() -> CacheSettings:
+        # Quotes for a closed exchange: long TTL (default 1 hour) — the price is
+        # frozen until it reopens, so there's no point re-fetching often.
+        return CacheSettings(
+            ttl_seconds=SettingsFactory._read_ttl(
+                "CACHE_CLOSED_TTL_SECONDS", DEFAULT_CLOSED_CACHE_TTL_SECONDS
+            )
+        )
+
+    @staticmethod
+    def create_fx_cache_settings() -> CacheSettings:
+        # FX rates: longer TTL (default 1 hour) since they move slowly.
+        return CacheSettings(
+            ttl_seconds=SettingsFactory._read_ttl(
+                "CACHE_FX_TTL_SECONDS", DEFAULT_FX_CACHE_TTL_SECONDS
+            )
+        )
 
     @staticmethod
     def create_cli_logging_settings(verbose: bool = False, debug: bool = False) -> LoggingSettings:

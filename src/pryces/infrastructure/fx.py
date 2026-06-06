@@ -28,7 +28,9 @@ class YahooFinanceFxProvider(FxRateProvider):
         self._provider = stock_provider
         self._logger = logger_factory.get_logger(__name__)
 
-    def get_rates(self, base: Currency, quotes: list[Currency]) -> dict[Currency, Decimal]:
+    def get_rates(
+        self, base: Currency, quotes: list[Currency], use_cache: bool = True
+    ) -> dict[Currency, Decimal]:
         rates: dict[Currency, Decimal] = {}
         needed: list[Currency] = []
         for quote in quotes:
@@ -42,7 +44,7 @@ class YahooFinanceFxProvider(FxRateProvider):
             return rates
 
         direct_lookup = {self._direct_symbol(q, base): q for q in needed}
-        direct_results = self._fetch(list(direct_lookup.keys()))
+        direct_results = self._fetch(list(direct_lookup.keys()), use_cache)
         still_needed: list[Currency] = []
         for symbol, quote in direct_lookup.items():
             stock = direct_results.get(symbol)
@@ -55,7 +57,7 @@ class YahooFinanceFxProvider(FxRateProvider):
             return rates
 
         inverted_lookup = {self._inverted_symbol(q, base): q for q in still_needed}
-        inverted_results = self._fetch(list(inverted_lookup.keys()))
+        inverted_results = self._fetch(list(inverted_lookup.keys()), use_cache)
         for symbol, quote in inverted_lookup.items():
             stock = inverted_results.get(symbol)
             if stock is not None and stock.current_price > 0:
@@ -65,10 +67,10 @@ class YahooFinanceFxProvider(FxRateProvider):
 
         return rates
 
-    def _fetch(self, symbols: list[str]) -> dict[str, object]:
+    def _fetch(self, symbols: list[str], use_cache: bool = True) -> dict[str, object]:
         if not symbols:
             return {}
-        results = self._provider.get_stocks(symbols)
+        results = self._provider.get_stocks(symbols, use_cache=use_cache)
         return {stock.symbol: stock for stock in results}
 
     @staticmethod

@@ -127,6 +127,7 @@ class Stock:
         "_fifty_two_week_low",
         "_market_cap",
         "_market_state",
+        "_next_market_open",
         "_price_delay_in_minutes",
         "_kind",
         "_cap_size",
@@ -172,6 +173,7 @@ class Stock:
         fifty_two_week_low: Decimal | None = None,
         market_cap: Decimal | None = None,
         market_state: MarketState | None = None,
+        next_market_open: datetime | None = None,
         price_delay_in_minutes: int | None = None,
         kind: InstrumentType | None = None,
     ):
@@ -189,6 +191,7 @@ class Stock:
         self._fifty_two_week_low = fifty_two_week_low
         self._market_cap = market_cap
         self._market_state = market_state
+        self._next_market_open = next_market_open
         self._price_delay_in_minutes = price_delay_in_minutes
         self._kind = kind
         self._cap_size: CapSize | None = self._compute_cap_size()
@@ -254,6 +257,12 @@ class Stock:
     @property
     def market_state(self) -> MarketState | None:
         return self._market_state
+
+    @property
+    def next_market_open(self) -> datetime | None:
+        # When the exchange is closed, the (UTC) time its regular session next
+        # opens, if known. Used to bound how long a closed quote is cached.
+        return self._next_market_open
 
     @property
     def price_delay_in_minutes(self) -> int | None:
