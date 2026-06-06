@@ -160,7 +160,8 @@ class YahooFinanceProvider(StockProvider):
             self._logger.error(f"Error fetching data for {symbol}: {e}")
             return None
 
-    def get_stocks(self, symbols: list[str]) -> list[Stock]:
+    def get_stocks(self, symbols: list[str], use_cache: bool = True) -> list[Stock]:
+        # Always fetches live; `use_cache` is honoured by CachedStockProvider, not here.
         if not symbols:
             return []
 

@@ -43,7 +43,7 @@ class TestYahooFinanceFxProvider:
         rates = self.fx.get_rates(Currency.EUR, [Currency.USD])
 
         assert rates == {Currency.USD: Decimal("0.92")}
-        self.mock_stock_provider.get_stocks.assert_called_once_with(["USDEUR=X"])
+        self.mock_stock_provider.get_stocks.assert_called_once_with(["USDEUR=X"], use_cache=True)
 
     def test_falls_back_to_inverted_pair(self):
         # First call (direct) returns nothing; second call (inverted) returns rate.
@@ -85,7 +85,7 @@ class TestYahooFinanceFxProvider:
 
         self.fx.get_rates(Currency.EUR, [Currency.USD, Currency.USD])
 
-        self.mock_stock_provider.get_stocks.assert_called_once_with(["USDEUR=X"])
+        self.mock_stock_provider.get_stocks.assert_called_once_with(["USDEUR=X"], use_cache=True)
 
     def test_skips_zero_or_negative_price(self):
         # Zero price (bad data) treated as missing → fallback to inverted, also missing → omitted.

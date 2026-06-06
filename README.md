@@ -102,6 +102,8 @@ Edit `.env` with your settings:
 | `TELEGRAM_GROUP_ID` | The Telegram group/chat ID where notifications are sent |
 | `MAX_FETCH_WORKERS` | Maximum number of concurrent workers for fetching stock data (values above 6 are not recommended on low-resource systems) |
 | `LOGS_DIRECTORY` | Directory path for log file output (use `/tmp` if you don't need persistent logs) |
+| `CACHE_TTL_SECONDS` | Optional. How long (seconds) live stock quotes are cached so repeated API calls don't re-hit Yahoo Finance. Defaults to `300` (5 minutes); set `0` to disable |
+| `CACHE_FX_TTL_SECONDS` | Optional. How long (seconds) FX rates are cached. They move slowly, so this defaults to `3600` (1 hour); set `0` to disable |
 
 The application loads these variables automatically from `.env` on startup via `python-dotenv`.
 

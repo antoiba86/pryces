@@ -11,7 +11,9 @@ from pryces.domain.stocks import Currency, Stock
 
 class StockProvider(ABC):
     @abstractmethod
-    def get_stocks(self, symbols: list[str]) -> list[Stock]:
+    def get_stocks(self, symbols: list[str], use_cache: bool = True) -> list[Stock]:
+        # `use_cache` is a hint honoured by caching decorators; providers that
+        # always hit the network may ignore it. Pass False to force a refresh.
         pass
 
 
@@ -23,10 +25,13 @@ class StockStatisticsProvider(ABC):
 
 class FxRateProvider(ABC):
     @abstractmethod
-    def get_rates(self, base: Currency, quotes: list[Currency]) -> dict[Currency, Decimal]:
+    def get_rates(
+        self, base: Currency, quotes: list[Currency], use_cache: bool = True
+    ) -> dict[Currency, Decimal]:
         # Returns rate-per-quote-unit in the base currency (so 1 USD = rate[USD] EUR
         # when base is EUR). Quotes equal to base map to Decimal("1"). Quotes for
-        # which no rate is available are omitted.
+        # which no rate is available are omitted. `use_cache=False` forces the
+        # underlying stock lookups to bypass any cache and refresh.
         pass
 
 
