@@ -311,7 +311,7 @@ Available commands:
 | 9 | List Portfolios | List all portfolios with base currency and transaction count |
 | 10 | Create Portfolio | Create a new portfolio (name optional, base currency) |
 | 11 | Show Portfolio | Show a portfolio with live prices (optionally send to Telegram) |
-| 12 | Import Transactions | Import a broker export (DEGIRO CSV / IBKR CSV / Renta 4 .xls / Horos CSV / JSON ledger) into a portfolio |
+| 12 | Import Transactions | Import a broker export (DEGIRO CSV / Trade Republic CSV / IBKR CSV / Renta 4 .xls / Horos CSV / JSON ledger) into a portfolio |
 | 13 | Delete Portfolio | Delete an existing portfolio |
 | 14 | Check Readiness | Verify env vars and Telegram connectivity |
 | 0 | Exit | Exit the program |
@@ -511,6 +511,9 @@ Typical flow:
 2. **Import Transactions** — point at a broker export and confirm. The importer is
    auto-detected (leave the broker blank), or you can name it explicitly:
    - **DEGIRO** — the `Transactions.csv` export (trades only).
+   - **Trade Republic** — the transaction export CSV; only `TRADING` rows (buys/sells,
+     including fractional savings-plan executions) are imported — cash transfers,
+     interest, and card payments are ignored. Instruments resolve by their ISIN.
    - **Interactive Brokers** — the Activity Statement Transaction History CSV.
    - **Renta 4** — the "Operaciones en Fondos de Inversión" export (a binary `.xls`):
      fund subscriptions/redemptions become buys/sells (units @ NAV). The export has no
