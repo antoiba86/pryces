@@ -307,6 +307,99 @@ class TestYahooSymbolResolver:
 
         assert result == "AAA.L"  # no EUR candidate → first equity, as before
 
+    def test_venue_match_in_later_query_beats_earlier_quote_currency_match(self):
+        # DEGIRO-style instrument with an exchange hint: the ISIN query only
+        # surfaces foreign listings (one quoted in EUR), but the name query
+        # surfaces the reference-venue listing — the venue must still win.
+        def search(query):
+            if query == "ES0000000001":
+                return [_quote("FOO.DE", exchange="GER"), _quote("FOO.L", exchange="LSE")]
+            if query == "Foo Corp":
+                return [_quote("FOO.MC", exchange="MCE")]
+            return []
+
+        provider = _FakeStockProvider({"FOO.DE": Currency.EUR, "FOO.L": Currency.USD})
+        resolver = YahooSymbolResolver(_StubLoggerFactory(), search=search, stock_provider=provider)
+        result = resolver.resolve(
+            Instrument(
+                symbol="ES0000000001",
+                name="Foo Corp",
+                exchange="MAD",
+                isin="ES0000000001",
+                currency=Currency.EUR,
+            )
+        )
+
+        assert result == "FOO.MC"
+        assert provider.calls == [["FOO.DE", "FOO.L"]]  # quote lookup ran once, first query only
+
+    def test_quote_currency_match_kept_when_exchange_hint_never_matches(self):
+        def search(query):
+            if query == "ES0000000001":
+                return [_quote("FOO.L", exchange="LSE"), _quote("FOO.DE", exchange="GER")]
+            return []
+
+        provider = _FakeStockProvider({"FOO.L": Currency.USD, "FOO.DE": Currency.EUR})
+        resolver = YahooSymbolResolver(_StubLoggerFactory(), search=search, stock_provider=provider)
+        result = resolver.resolve(
+            Instrument(
+                symbol="ES0000000001",
+                name="Foo Corp",
+                exchange="MAD",
+                isin="ES0000000001",
+                currency=Currency.EUR,
+            )
+        )
+
+        assert result == "FOO.DE"  # full scan found no venue → verified currency wins
+
+    def test_quote_currency_match_returns_immediately_without_exchange_hint(self):
+        # Trade Republic/IBKR-style instrument (no exchange code): nothing can
+        # beat a verified quote-currency match, so later queries are skipped.
+        searched = []
+
+        def search(query):
+            searched.append(query)
+            return [_quote("MXWO.L", exchange="LSE"), _quote("SC0J.DE", exchange="GER")]
+
+        provider = _FakeStockProvider({"MXWO.L": Currency.USD, "SC0J.DE": Currency.EUR})
+        resolver = YahooSymbolResolver(_StubLoggerFactory(), search=search, stock_provider=provider)
+        result = resolver.resolve(
+            Instrument(
+                symbol="IE00B60SX394",
+                name="MSCI World",
+                isin="IE00B60SX394",
+                currency=Currency.EUR,
+            )
+        )
+
+        assert result == "SC0J.DE"
+        assert searched == ["IE00B60SX394"]
+
+    def test_unmapped_exchange_code_counts_as_no_hint(self):
+        # An exchange code with no Yahoo alias can never match, so it must not
+        # force the full multi-query scan.
+        searched = []
+
+        def search(query):
+            searched.append(query)
+            return [_quote("MXWO.L", exchange="LSE"), _quote("SC0J.DE", exchange="GER")]
+
+        provider = _FakeStockProvider({"MXWO.L": Currency.USD, "SC0J.DE": Currency.EUR})
+        resolver = YahooSymbolResolver(_StubLoggerFactory(), search=search, stock_provider=provider)
+        result = resolver.resolve(
+            Instrument(
+                symbol="IE00B60SX394",
+                name="MSCI World",
+                exchange="XXX",
+                isin="IE00B60SX394",
+                currency=Currency.EUR,
+            )
+        )
+
+        assert result == "SC0J.DE"
+        assert searched == ["IE00B60SX394"]
+
 
 class TestCachedSymbolResolver:
 

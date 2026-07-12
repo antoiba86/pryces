@@ -158,6 +158,7 @@ class YahooSymbolResolver(SymbolResolver):
         # equity seen.
         fallback: str | None = None
         by_currency: str | None = None
+        by_quote_currency: str | None = None
         for query in self._queries(isin, instrument.symbol, instrument.name):
             equities = self._equities(query)
             if not equities:
@@ -165,22 +166,29 @@ class YahooSymbolResolver(SymbolResolver):
             matched = self._match_exchange(equities, instrument.exchange)
             if matched is not None:
                 return matched.get("symbol")
-            # Prefer a listing actually quoted in the instrument's currency. The
-            # search API omits currency, so this verifies it against the live
-            # quote — pinning e.g. a EUR-settled ETF to its EUR listing instead
-            # of an arbitrary MXN/USD cross-listing Yahoo happens to return first.
-            ccy_match = self._match_quote_currency(equities, instrument.currency)
-            if ccy_match is not None:
-                return ccy_match
+            if by_quote_currency is None:
+                # Prefer a listing actually quoted in the instrument's currency.
+                # The search API omits currency, so this verifies it against the
+                # live quote — pinning e.g. a EUR-settled ETF to its EUR listing
+                # instead of an arbitrary MXN/USD cross-listing Yahoo happens to
+                # return first. Without a usable exchange hint no stronger signal
+                # can appear, so return right away; with one, keep scanning — a
+                # venue match in a later query still wins.
+                by_quote_currency = self._match_quote_currency(equities, instrument.currency)
+                if by_quote_currency is not None and not self._has_exchange_hint(
+                    instrument.exchange
+                ):
+                    return by_quote_currency
             if by_currency is None:
                 currency_match = self._match_currency(equities, instrument.currency)
                 if currency_match is not None:
                     by_currency = currency_match.get("symbol")
             if fallback is None:
                 fallback = equities[0].get("symbol")
-        # Exchange match wins; a currency-home-market match is the next-best
-        # signal (pins e.g. an AUD trade to ASX); first equity is the last resort.
-        resolved = by_currency or fallback
+        # Exchange match wins; a verified quote-currency match is next; then a
+        # currency-home-market match (pins e.g. an AUD trade to ASX); the first
+        # equity seen is the last resort.
+        resolved = by_quote_currency or by_currency or fallback
         if resolved is not None:
             return resolved
         self._logger.warning(f"Could not resolve a Yahoo symbol for {isin or instrument.symbol}")
@@ -209,6 +217,12 @@ class YahooSymbolResolver(SymbolResolver):
             for quote in candidates
             if quote.get("quoteType", "").upper() in _RESOLVABLE_QUOTE_TYPES and quote.get("symbol")
         ]
+
+    @staticmethod
+    def _has_exchange_hint(exchange: str | None) -> bool:
+        # An exchange code we can't map to Yahoo venues can never produce a
+        # match, so it doesn't count as a hint worth scanning further for.
+        return bool(exchange) and _EXCHANGE_ALIASES.get(exchange.strip().upper()) is not None
 
     @staticmethod
     def _match_exchange(equities: list[dict], exchange: str | None) -> dict | None:
