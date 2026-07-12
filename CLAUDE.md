@@ -78,7 +78,7 @@ Plan mode ensures alignment on approach before implementation, preventing wasted
 ### Always Run and Update Tests After Code Changes
 **IMPORTANT**: After making any code changes, you MUST:
 
-1. **Run the full test suite** to verify nothing is broken: `source venv/bin/activate && pytest`
+1. **Run the full test suite** to verify nothing is broken: `uv run --extra dev pytest` (or `make test`)
 2. **Fix any failing tests** caused by your changes before considering the task done
 3. **Add new tests** to cover new behavior — new commands, use cases, services, or non-trivial logic must have corresponding tests
 4. **Delete obsolete tests** when removing the code they cover
@@ -91,20 +91,19 @@ Plan mode ensures alignment on approach before implementation, preventing wasted
 
 Never consider an implementation task complete without a passing test suite.
 
-### Always Use Virtual Environment for Testing
-**IMPORTANT**: This project uses a Python virtual environment. You MUST activate it before running any tests or testing code manually.
+### Always Run Python Through uv
+**IMPORTANT**: This project's environment is managed by `uv` (Astral). Never activate a venv manually, call a bare `python`/`pytest`, or install packages globally — prefix every Python invocation with `uv run`.
 
-**Required workflow:**
-1. **Before testing**: Activate the virtual environment with `source venv/bin/activate` (or `source .venv/bin/activate` depending on the venv location)
-2. **Run tests**: Execute `pytest` or test the CLI manually
-3. **After testing**: Deactivate with `deactivate`
+**Common commands:**
+- Run tests: `uv run --extra dev pytest` (or `make test`)
+- Format: `uv run --extra dev black src/ tests/ --line-length 100` (or `make format`)
+- Anything else: `uv run python -m ...` — dev-only tools need the `--extra dev` flag
 
 **Why this matters:**
-- Running tests without the venv will fail due to missing dependencies
-- Attempting to install packages globally wastes time and may cause permission errors
-- Always check for the venv before running Python commands
+- `uv run` resolves the project's `.venv` (auto-creating and syncing it from `pyproject.toml`/`uv.lock` on first use), so commands always run against the right dependencies
+- The `Makefile` targets wrap these invocations — prefer them for the standard entry points
 
-**Never**: Try to install the Python environment from scratch or install packages globally. The virtual environment already exists and contains all required dependencies.
+**Note**: launch uvicorn as `uv run python -m uvicorn ...` (`make api`); the bare `uvicorn` script may not spawn. If a console script ever fails with "Failed to spawn", the venv's entry points are stale — recreate with `rm -rf .venv && uv sync --extra dev`.
 
 ### Working with GitHub Issues
 **IMPORTANT**: When interacting with GitHub issues, follow these rules:
