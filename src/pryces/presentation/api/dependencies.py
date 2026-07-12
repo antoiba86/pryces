@@ -35,6 +35,7 @@ from ...infrastructure.importers.ibkr import IbkrActivityImporter
 from ...infrastructure.importers.json_ledger import JsonLedgerImporter
 from ...infrastructure.importers.horos import HorosFundsImporter
 from ...infrastructure.importers.renta4 import Renta4FundsImporter
+from ...infrastructure.importers.trade_republic import TradeRepublicCsvImporter
 from ...infrastructure.logging import PythonLoggerFactory
 from ...infrastructure.providers import YahooFinanceHistoricalPriceProvider, YahooFinanceProvider
 from ...infrastructure.repositories import JsonPortfolioRepository
@@ -121,9 +122,12 @@ def get_historical_price_provider(
 
 def get_symbol_resolver(
     logger_factory: LoggerFactory = Depends(get_logger_factory),
+    stock_provider: StockProvider = Depends(get_stock_provider),
 ) -> SymbolResolver:
     return CachedSymbolResolver(
-        YahooSymbolResolver(logger_factory), JsonSymbolMap(), logger_factory
+        YahooSymbolResolver(logger_factory, stock_provider=stock_provider),
+        JsonSymbolMap(),
+        logger_factory,
     )
 
 
@@ -133,6 +137,7 @@ def get_importer_registry(
     return ImporterRegistry(
         [
             DegiroCsvImporter(),
+            TradeRepublicCsvImporter(),
             JsonLedgerImporter(),
             IbkrActivityImporter(),
             Renta4FundsImporter(),

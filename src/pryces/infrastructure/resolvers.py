@@ -9,7 +9,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from ..application.interfaces import LoggerFactory, SymbolResolver
+from ..application.interfaces import LoggerFactory, StockProvider, SymbolResolver
 from ..domain.portfolio.transactions import Instrument
 from ..domain.stocks import Currency
 from .repositories import resolve_data_dir
@@ -132,9 +132,18 @@ class YahooSymbolResolver(SymbolResolver):
     name) pass through unchanged. Any network/parse failure yields None.
     """
 
-    def __init__(self, logger_factory: LoggerFactory, search: SearchFn | None = None) -> None:
+    def __init__(
+        self,
+        logger_factory: LoggerFactory,
+        search: SearchFn | None = None,
+        stock_provider: StockProvider | None = None,
+    ) -> None:
         self._logger = logger_factory.get_logger(__name__)
         self._search = search if search is not None else _yahoo_search
+        # Optional: when supplied, candidates are disambiguated by their *actual*
+        # quote currency (the search API omits currency), so an instrument with a
+        # known currency resolves to a listing in that currency.
+        self._stock_provider = stock_provider
 
     def resolve(self, instrument: Instrument) -> str | None:
         isin = instrument.isin or (instrument.symbol if _is_isin(instrument.symbol) else None)
@@ -156,6 +165,13 @@ class YahooSymbolResolver(SymbolResolver):
             matched = self._match_exchange(equities, instrument.exchange)
             if matched is not None:
                 return matched.get("symbol")
+            # Prefer a listing actually quoted in the instrument's currency. The
+            # search API omits currency, so this verifies it against the live
+            # quote — pinning e.g. a EUR-settled ETF to its EUR listing instead
+            # of an arbitrary MXN/USD cross-listing Yahoo happens to return first.
+            ccy_match = self._match_quote_currency(equities, instrument.currency)
+            if ccy_match is not None:
+                return ccy_match
             if by_currency is None:
                 currency_match = self._match_currency(equities, instrument.currency)
                 if currency_match is not None:
@@ -204,6 +220,22 @@ class YahooSymbolResolver(SymbolResolver):
         for quote in equities:
             if quote.get("exchange", "").upper() in allowed:
                 return quote
+        return None
+
+    def _match_quote_currency(self, equities: list[dict], currency: Currency | None) -> str | None:
+        # Needs a known target currency and a provider to read each candidate's
+        # real currency; without either, this is a no-op (legacy behaviour).
+        if currency is None or self._stock_provider is None:
+            return None
+        symbols = [quote["symbol"] for quote in equities if quote.get("symbol")]
+        if not symbols:
+            return None
+        stocks = {stock.symbol.upper(): stock for stock in self._stock_provider.get_stocks(symbols)}
+        # Return the first candidate (search order) genuinely quoted in `currency`.
+        for quote in equities:
+            stock = stocks.get((quote.get("symbol") or "").upper())
+            if stock is not None and stock.currency == currency:
+                return quote.get("symbol")
         return None
 
     @staticmethod

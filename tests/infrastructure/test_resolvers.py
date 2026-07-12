@@ -28,6 +28,25 @@ def _quote(symbol, exchange="NMS", quote_type="EQUITY"):
     return {"symbol": symbol, "exchange": exchange, "quoteType": quote_type}
 
 
+class _FakeStockProvider:
+    """Returns a Stock per requested symbol with a preset currency (or None)."""
+
+    def __init__(self, currencies: dict[str, "Currency | None"]) -> None:
+        self._currencies = currencies
+        self.calls: list[list[str]] = []
+
+    def get_stocks(self, symbols, use_cache: bool = True):
+        from decimal import Decimal
+
+        from pryces.domain.stocks import Stock
+
+        self.calls.append(list(symbols))
+        return [
+            Stock(symbol=s, current_price=Decimal("1"), currency=self._currencies.get(s))
+            for s in symbols
+        ]
+
+
 class TestJsonSymbolMap:
 
     def test_put_then_get_roundtrips(self, tmp_path):
@@ -213,6 +232,80 @@ class TestYahooSymbolResolver:
         result = resolver.resolve(Instrument(symbol="US0000000004", isin="US0000000004"))
 
         assert result is None
+
+    def test_prefers_listing_in_instrument_currency_via_quote(self):
+        # The Trade Republic case: ISIN search lists an MXN and a USD cross-listing
+        # before the EUR one. With a provider to read each candidate's real
+        # currency, the EUR-settled instrument resolves to its EUR listing.
+        def search(query):
+            if query == "FR0013416716":
+                return [
+                    _quote("AMGOLDN.MX", exchange="MEX", quote_type="ETF"),
+                    _quote("GLDA.SG", exchange="STU", quote_type="ETF"),
+                    _quote("GOLD.AS", exchange="AMS", quote_type="ETF"),
+                ]
+            return []
+
+        provider = _FakeStockProvider(
+            {"AMGOLDN.MX": None, "GLDA.SG": Currency.EUR, "GOLD.AS": Currency.USD}
+        )
+        resolver = YahooSymbolResolver(_StubLoggerFactory(), search=search, stock_provider=provider)
+        result = resolver.resolve(
+            Instrument(
+                symbol="FR0013416716",
+                name="Physical Gold",
+                isin="FR0013416716",
+                currency=Currency.EUR,
+            )
+        )
+
+        assert result == "GLDA.SG"
+
+    def test_quote_currency_match_overrides_first_equity_fallback(self):
+        # Without a provider, EUR can't disambiguate and the first equity wins
+        # (see test_currency_hint_ignored_for_eur_multi_venue). With one, the
+        # listing actually quoted in EUR is chosen instead.
+        def search(query):
+            return [_quote("MXWO.L", exchange="LSE"), _quote("SC0J.DE", exchange="GER")]
+
+        provider = _FakeStockProvider({"MXWO.L": Currency.USD, "SC0J.DE": Currency.EUR})
+        resolver = YahooSymbolResolver(_StubLoggerFactory(), search=search, stock_provider=provider)
+        result = resolver.resolve(
+            Instrument(symbol="IE00B60SX394", isin="IE00B60SX394", currency=Currency.EUR)
+        )
+
+        assert result == "SC0J.DE"
+
+    def test_exchange_hint_skips_currency_quote_lookup(self):
+        # When the exchange hint resolves it (DEGIRO), no quote lookup is needed.
+        def search(query):
+            return [_quote("FOO.MC", exchange="MCE"), _quote("FOO.F", exchange="FRA")]
+
+        provider = _FakeStockProvider({"FOO.MC": Currency.EUR, "FOO.F": Currency.EUR})
+        resolver = YahooSymbolResolver(_StubLoggerFactory(), search=search, stock_provider=provider)
+        result = resolver.resolve(
+            Instrument(
+                symbol="ES0000000001",
+                exchange="MAD",
+                isin="ES0000000001",
+                currency=Currency.EUR,
+            )
+        )
+
+        assert result == "FOO.MC"
+        assert provider.calls == []  # exchange match returned before any quote fetch
+
+    def test_falls_back_to_first_equity_when_no_currency_matches(self):
+        def search(query):
+            return [_quote("AAA.L", exchange="LSE"), _quote("BBB.MX", exchange="MEX")]
+
+        provider = _FakeStockProvider({"AAA.L": Currency.USD, "BBB.MX": None})
+        resolver = YahooSymbolResolver(_StubLoggerFactory(), search=search, stock_provider=provider)
+        result = resolver.resolve(
+            Instrument(symbol="X0000000001", isin="X0000000001", currency=Currency.EUR)
+        )
+
+        assert result == "AAA.L"  # no EUR candidate → first equity, as before
 
 
 class TestCachedSymbolResolver:
