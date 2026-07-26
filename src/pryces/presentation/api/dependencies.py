@@ -16,9 +16,11 @@ from ...application.interfaces import (
 )
 from ...application.use_cases.create_portfolio import CreatePortfolio
 from ...application.use_cases.delete_portfolio import DeletePortfolio
+from ...application.use_cases.export_data import ExportData
 from ...application.use_cases.get_overview import GetOverview
 from ...application.use_cases.get_portfolio import GetPortfolio
 from ...application.use_cases.get_transactions import GetTransactions
+from ...application.use_cases.import_data import ImportData
 from ...application.use_cases.import_transactions import ImportTransactions
 from ...application.use_cases.list_portfolios import ListPortfolios
 from ...application.use_cases.manage_transactions import (
@@ -201,6 +203,18 @@ def get_get_transactions(
     repository: PortfolioRepository = Depends(get_portfolio_repository),
 ) -> GetTransactions:
     return GetTransactions(repository)
+
+
+def get_export_data(
+    repository: PortfolioRepository = Depends(get_portfolio_repository),
+) -> ExportData:
+    return ExportData(repository)
+
+
+def get_import_data(
+    repository: PortfolioRepository = Depends(get_portfolio_repository),
+) -> ImportData:
+    return ImportData(repository)
 
 
 def get_import_transactions(

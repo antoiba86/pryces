@@ -19,7 +19,11 @@ from ..domain.portfolio.portfolio import ManualAsset, PortfolioSummary
 from ..domain.portfolio.transactions import Transaction, TransactionType
 from ..domain.stocks import Currency, Stock
 
-DEFAULT_DATA_DIR = Path.home() / ".pryces"
+# Anchored to the repo root (four levels up from this file:
+# infrastructure → pryces → src → repo root) rather than the current working
+# directory, so the data dir is stable no matter where the app is launched from.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_DATA_DIR = _REPO_ROOT / "data"
 DATA_DIR_ENV_VAR = "PRYCES_DATA_DIR"
 PORTFOLIOS_SUBDIR = "portfolios"
 INDEX_FILENAME = "index.json"

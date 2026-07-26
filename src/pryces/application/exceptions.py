@@ -43,3 +43,11 @@ class TransactionNotFound(Exception):
     def __init__(self, transaction_id: str) -> None:
         self.transaction_id = transaction_id
         super().__init__(f"Transaction not found: {transaction_id}")
+
+
+class InvalidExportDocument(Exception):
+    """The content is not a usable pryces export (wrong envelope or version)."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"Invalid export document: {reason}")

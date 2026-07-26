@@ -25,6 +25,7 @@ Retrieves real-time stock data from Yahoo Finance and delivers Telegram notifica
     - [Stop Monitor Process](#stop-monitor-process)
     - [Get Stock Prices](#get-stock-prices)
     - [Check Readiness](#check-readiness)
+- [Backup and Restore](#backup-and-restore)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -272,6 +273,8 @@ uvicorn pryces.presentation.api.main:app --port 8000
 | PATCH | `/portfolios/{name}/transactions/{id}` | Edit a transaction's fields (same JSON body) |
 | DELETE | `/portfolios/{name}/transactions/{id}` | Delete a transaction |
 | GET | `/overview/transactions?symbol=` | A symbol's trade history across all portfolios (rows tagged with their portfolio) |
+| GET | `/data/export?portfolio=` | Download a JSON backup of all portfolio data (or one portfolio) as a file attachment — see [Backup and Restore](#backup-and-restore) |
+| POST | `/data/import` | Restore a backup (`multipart/form-data` file). Merge with dedup; **400** on non-JSON, **422** on an unrecognized document |
 
 ```bash
 curl http://127.0.0.1:8000/health
@@ -314,6 +317,8 @@ Available commands:
 | 12 | Import Transactions | Import a broker export (DEGIRO CSV / Trade Republic CSV / IBKR CSV / Renta 4 .xls / Horos CSV / JSON ledger) into a portfolio |
 | 13 | Delete Portfolio | Delete an existing portfolio |
 | 14 | Check Readiness | Verify env vars and Telegram connectivity |
+| 15 | Export Data | Export all portfolio data (or one portfolio) to a JSON backup file |
+| 16 | Import Data | Restore portfolio data from a JSON export file (merge with dedup) |
 | 0 | Exit | Exit the program |
 
 Configs are stored in the `configs/` directory at the project root. Use the CLI to create and manage them — there is no need to edit JSON files manually.
@@ -500,9 +505,9 @@ Fix the errors above and restart the app for changes to take effect.
 #### Portfolios
 
 Pryces tracks one or more named portfolios alongside stock monitoring. Portfolio
-data is stored as JSON outside the repository — by default under `~/.pryces/`
-(override with the `PRYCES_DATA_DIR` environment variable) — so it is never
-accidentally committed and can be shared across checkouts.
+data is stored as JSON under the app's `data/` folder by default (override with the
+`PRYCES_DATA_DIR` environment variable). The folder is git-ignored, so personal
+holdings are never accidentally committed.
 
 Typical flow:
 
@@ -517,7 +522,7 @@ Typical flow:
    - **Interactive Brokers** — the Activity Statement Transaction History CSV.
    - **Renta 4** — the "Operaciones en Fondos de Inversión" export (a binary `.xls`):
      fund subscriptions/redemptions become buys/sells (units @ NAV). The export has no
-     ISIN, so map the fund name to its Yahoo symbol once in `~/.pryces/symbol_map.json`
+     ISIN, so map the fund name to its Yahoo symbol once in `data/symbol_map.json`
      (e.g. `"R4 MULTIGESTION NUMANTIA PATR. GLOBAL": "0P000168OI.F"`).
    - **Horos** — Horos has no download, so paste its web "movimientos" table into a
      semicolon CSV (`TIPO DE OPERACIÓN; PRODUCTO; VL; IMPORTE; FECHA`); units are derived
@@ -568,7 +573,7 @@ rows) — by the **trade currency's home market** (an AUD trade resolves to the 
 listing, not a US OTC cross-listing). Stocks, ETFs, and **mutual funds** all resolve this
 way — a fund's ISIN maps to its Yahoo NAV symbol (e.g. `ES0173311103` →
 `0P000168OI.F`) and prices like any other position. The mapping is cached in a
-user-editable file at `~/.pryces/symbol_map.json`. If a guess is wrong (or an instrument can't be
+user-editable file at `data/symbol_map.json`. If a guess is wrong (or an instrument can't be
 resolved — it's reported under "unresolved symbols"), edit that file: add or correct
 the `"<ISIN>": "<TICKER>"` entry and the next import/show picks it up.
 
@@ -579,6 +584,48 @@ Imported into main via degiro:
   parsed: 21
   inserted: 21
   duplicates skipped: 0
+```
+
+## Backup and Restore
+
+All portfolio data (names, base currencies, transactions, manual assets) can be exported to a single versioned JSON document and restored from it — for backups, moving to another machine, or seeding a test environment. Available from the CLI (menu items 15/16), the HTTP API (`GET /data/export`, `POST /data/import`), and the web dashboard.
+
+```json
+{
+  "format": "pryces-export",
+  "version": 1,
+  "exported_at": "2026-07-12T10:30:00+00:00",
+  "portfolios": [
+    {
+      "name": "main",
+      "base_currency": "EUR",
+      "transactions": [
+        {"date": "2026-01-15", "type": "buy", "symbol": "AAPL", "currency": "USD",
+         "fee": "2.50", "quantity": "10", "price": "150.25", "broker": "degiro", "raw_id": "abc"}
+      ],
+      "manual_assets": [
+        {"name": "Savings", "asset_type": "CASH", "value_base": "1000.00"}
+      ]
+    }
+  ]
+}
+```
+
+All monetary values are strings (decimal-exact); `quantity`/`price`/`amount`/`broker`/`raw_id` are optional per row. Exporting a single portfolio produces the same document with one entry.
+
+**Import semantics (merge with dedup — safe to re-run):**
+
+- Missing portfolios are created; existing ones are merged. An existing portfolio with a *different* base currency is skipped with a warning.
+- Broker rows dedup on `(broker, raw_id)`; manual rows (no `raw_id`) dedup by full content — so re-importing the same backup adds nothing.
+- `manual_assets`, when present (even empty), replaces the portfolio's manual assets; when the key is absent they're left untouched.
+- A wrong `format`/`version` aborts the whole import; malformed entries or rows are skipped with warnings and everything else proceeds.
+
+The export covers portfolio data only — the symbol map (`data/symbol_map.json`) and monitor configs are not included.
+
+```bash
+curl -OJ 'http://127.0.0.1:8000/data/export'                    # download a backup
+curl -OJ 'http://127.0.0.1:8000/data/export?portfolio=main'     # just one portfolio
+curl -F file=@pryces_export_20260712.json http://127.0.0.1:8000/data/import
 ```
 
 ## Contributing

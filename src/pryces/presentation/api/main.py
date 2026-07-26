@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import health, overview, portfolios
+from .routes import data, health, overview, portfolios
 
 
 def create_app() -> FastAPI:
@@ -21,6 +21,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(overview.router)
     app.include_router(portfolios.router)
+    app.include_router(data.router)
     return app
 
 

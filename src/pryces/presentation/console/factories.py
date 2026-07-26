@@ -11,8 +11,10 @@ from ...application.interfaces import (
 )
 from ...application.use_cases.create_portfolio import CreatePortfolio
 from ...application.use_cases.delete_portfolio import DeletePortfolio
+from ...application.use_cases.export_data import ExportData
 from ...application.use_cases.get_portfolio import GetPortfolio
 from ...application.use_cases.get_stocks_prices import GetStocksPrices
+from ...application.use_cases.import_data import ImportData
 from ...application.use_cases.import_transactions import ImportTransactions
 from ...application.use_cases.list_portfolios import ListPortfolios
 from ...application.use_cases.send_messages import SendMessages
@@ -24,7 +26,9 @@ from .commands.create_portfolio import CreatePortfolioCommand
 from .commands.delete_config import DeleteConfigCommand
 from .commands.delete_portfolio import DeletePortfolioCommand
 from .commands.edit_config import EditConfigCommand
+from .commands.export_data import ExportDataCommand
 from .commands.get_stocks_prices import GetStocksPricesCommand
+from .commands.import_data import ImportDataCommand
 from .commands.import_transactions import ImportTransactionsCommand
 from .commands.list_configs import ListConfigsCommand
 from .commands.list_monitors import ListMonitorsCommand
@@ -97,6 +101,15 @@ class CommandFactory:
             [importer.broker_id for importer in self._importer_registry.importers],
         )
 
+    def _create_export_data_command(self) -> ExportDataCommand:
+        return ExportDataCommand(
+            ListPortfolios(self._portfolio_repository),
+            ExportData(self._portfolio_repository),
+        )
+
+    def _create_import_data_command(self) -> ImportDataCommand:
+        return ImportDataCommand(ImportData(self._portfolio_repository))
+
     def _create_monitor_stocks_command(self) -> MonitorStocksCommand:
         return MonitorStocksCommand(self._config_store)
 
@@ -153,4 +166,6 @@ class CommandFactory:
         registry.register(self._create_import_transactions_command())
         registry.register(self._create_delete_portfolio_command())
         registry.register(self._create_check_readiness_command())
+        registry.register(self._create_export_data_command())
+        registry.register(self._create_import_data_command())
         return registry

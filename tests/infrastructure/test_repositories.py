@@ -111,10 +111,11 @@ def _dividend(amount="2.40") -> Transaction:
 
 
 class TestResolveDataDir:
-    def test_default_is_home_pryces(self, monkeypatch):
+    def test_default_is_repo_data_dir(self, monkeypatch):
         monkeypatch.delenv(DATA_DIR_ENV_VAR, raising=False)
         result = resolve_data_dir()
-        assert result.name == ".pryces"
+        assert result.name == "data"
+        assert result.parent.name == "pryces-api"
 
     def test_env_var_override(self, monkeypatch, tmp_path):
         monkeypatch.setenv(DATA_DIR_ENV_VAR, str(tmp_path))
