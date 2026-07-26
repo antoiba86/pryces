@@ -56,6 +56,17 @@ class TargetPriceDTO:
 
 
 @dataclass(frozen=True, slots=True)
+class ImportDataResultDTO:
+    portfolios_created: int
+    portfolios_merged: int
+    portfolios_skipped: int
+    transactions_added: int
+    transactions_skipped: int
+    manual_assets_replaced: int
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ImportResultDTO:
     broker: str
     parsed: int

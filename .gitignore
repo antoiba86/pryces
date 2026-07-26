@@ -58,3 +58,7 @@ nohup.out
 # Local docs / personal data (keep the folder, ignore its contents)
 docs/*
 !docs/.gitkeep
+
+# Portfolio data (JSON store + symbol map) — keep the folder, ignore its contents
+data/*
+!data/.gitkeep

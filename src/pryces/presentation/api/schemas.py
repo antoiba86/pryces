@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
-from ...application.dtos import ImportResultDTO
+from ...application.dtos import ImportDataResultDTO, ImportResultDTO
 from ...domain.portfolio.portfolio import (
     ClosedPosition,
     ManualAsset,
@@ -221,6 +221,28 @@ class OverviewResponse(BaseModel):
 class CreatePortfolioBody(BaseModel):
     base_currency: str
     name: str | None = None
+
+
+class ImportDataResultResponse(BaseModel):
+    portfolios_created: int
+    portfolios_merged: int
+    portfolios_skipped: int
+    transactions_added: int
+    transactions_skipped: int
+    manual_assets_replaced: int
+    warnings: list[str]
+
+    @classmethod
+    def from_dto(cls, dto: ImportDataResultDTO) -> ImportDataResultResponse:
+        return cls(
+            portfolios_created=dto.portfolios_created,
+            portfolios_merged=dto.portfolios_merged,
+            portfolios_skipped=dto.portfolios_skipped,
+            transactions_added=dto.transactions_added,
+            transactions_skipped=dto.transactions_skipped,
+            manual_assets_replaced=dto.manual_assets_replaced,
+            warnings=list(dto.warnings),
+        )
 
 
 class ImportResultResponse(BaseModel):

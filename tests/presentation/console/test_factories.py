@@ -74,6 +74,8 @@ class TestCommandFactory:
             "show_portfolio",
             "import_transactions",
             "delete_portfolio",
+            "export_data",
+            "import_data",
         ):
             assert registry.get_command(command_id) is not None
 
