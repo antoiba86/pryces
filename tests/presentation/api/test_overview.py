@@ -81,23 +81,23 @@ def client(tmp_path):
 
 class TestOverviewApi:
     def test_empty_overview(self, client):
-        body = client.get("/overview").json()
+        body = client.get("/api/overview").json()
         assert body["portfolio"]["positions"] == []
         assert body["breakdown"] == []
 
     def test_combines_portfolios(self, client):
-        client.post("/portfolios", json={"base_currency": "EUR", "name": "degiro"})
-        client.post("/portfolios", json={"base_currency": "EUR", "name": "ibkr"})
+        client.post("/api/portfolios", json={"base_currency": "EUR", "name": "degiro"})
+        client.post("/api/portfolios", json={"base_currency": "EUR", "name": "ibkr"})
         client.post(
-            "/portfolios/degiro/transactions",
+            "/api/portfolios/degiro/transactions",
             files={"file": ("l.json", _ledger("AAPL", "a1"), "application/json")},
         )
         client.post(
-            "/portfolios/ibkr/transactions",
+            "/api/portfolios/ibkr/transactions",
             files={"file": ("l.json", _ledger("MSFT", "b1"), "application/json")},
         )
 
-        body = client.get("/overview").json()
+        body = client.get("/api/overview").json()
 
         symbols = {p["symbol"] for p in body["portfolio"]["positions"]}
         assert symbols == {"AAPL", "MSFT"}
@@ -106,18 +106,18 @@ class TestOverviewApi:
         assert {b["name"] for b in body["breakdown"]} == {"degiro", "ibkr"}
 
     def test_overview_transactions_across_portfolios(self, client):
-        client.post("/portfolios", json={"base_currency": "EUR", "name": "degiro"})
-        client.post("/portfolios", json={"base_currency": "EUR", "name": "ibkr"})
+        client.post("/api/portfolios", json={"base_currency": "EUR", "name": "degiro"})
+        client.post("/api/portfolios", json={"base_currency": "EUR", "name": "ibkr"})
         client.post(
-            "/portfolios/degiro/transactions",
+            "/api/portfolios/degiro/transactions",
             files={"file": ("l.json", _ledger("AAPL", "a1"), "application/json")},
         )
         client.post(
-            "/portfolios/ibkr/transactions",
+            "/api/portfolios/ibkr/transactions",
             files={"file": ("l.json", _ledger("AAPL", "b1"), "application/json")},
         )
 
-        rows = client.get("/overview/transactions", params={"symbol": "AAPL"}).json()
+        rows = client.get("/api/overview/transactions", params={"symbol": "AAPL"}).json()
 
         assert len(rows) == 2
         assert {r["portfolio"] for r in rows} == {"degiro", "ibkr"}

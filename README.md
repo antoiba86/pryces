@@ -259,6 +259,12 @@ uvicorn pryces.presentation.api.main:app --port 8000
 # interactive OpenAPI docs at http://127.0.0.1:8000/docs
 ```
 
+Every route below is served under an **`/api` prefix** (`/api/health`, `/api/portfolios`, …).
+The root path is reserved for the bundled dashboard: if a built CaudalNet bundle is present,
+it is served at `/`, making the API and the front end a single same-origin process. Set
+`PRYCES_WEB_DIR` to point at the bundle (defaults to `web/` beside the project root); when
+the directory is absent the app runs headless and only `/api` responds.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness check |
@@ -277,14 +283,32 @@ uvicorn pryces.presentation.api.main:app --port 8000
 | POST | `/data/import` | Restore a backup (`multipart/form-data` file). Merge with dedup; **400** on non-JSON, **422** on an unrecognized document |
 
 ```bash
-curl http://127.0.0.1:8000/health
-curl -X POST http://127.0.0.1:8000/portfolios \
+curl http://127.0.0.1:8000/api/health
+curl -X POST http://127.0.0.1:8000/api/portfolios \
      -H 'Content-Type: application/json' -d '{"base_currency":"EUR","name":"main"}'
-curl -F file=@docs/Transactions.csv 'http://127.0.0.1:8000/portfolios/main/transactions?broker=degiro'
-curl http://127.0.0.1:8000/portfolios/main
+curl -F file=@docs/Transactions.csv 'http://127.0.0.1:8000/api/portfolios/main/transactions?broker=degiro'
+curl http://127.0.0.1:8000/api/portfolios/main
 ```
 
-All monetary values serialize as strings to preserve decimal precision. CORS is enabled for `http://localhost` origins only, and the server binds to loopback — there is no authentication in v1 (it's designed for local/single-user use, with a `current_user_id` seam for adding auth later).
+All monetary values serialize as strings to preserve decimal precision. CORS is enabled for `http://localhost` origins only — needed solely when the dashboard runs on its own dev server, since a bundled dashboard is same-origin. The server binds to loopback and there is no authentication in v1 (it's designed for local/single-user use, with a `current_user_id` seam for adding auth later).
+
+### Home Assistant app
+
+`homeassistant/` packages the API *and* the dashboard as a locally-built Home Assistant app,
+served through **ingress** — CaudalNet appears in the Home Assistant sidebar behind Home
+Assistant's own authentication, with nothing exposed on the network.
+
+```bash
+cd ../caudalnet-web && npm run build   # the dashboard is built on your workstation
+cd ../pryces-api && make ha-app        # assembles build/ha-app/
+```
+
+Copy `build/ha-app/` to `/addons/pryces/` on the Home Assistant host, then **Settings → Apps
+→ App store → ⋮ → Check for updates** and install *Pryces Portfolio* from **Local apps**.
+Portfolios persist in `/data/pryces`, which is included in Home Assistant's backups.
+
+See [`homeassistant/DOCS.md`](homeassistant/DOCS.md) for the configuration options and for
+the `rest:` sensor snippet that surfaces portfolio totals as Home Assistant entities.
 
 ### Interactive CLI
 

@@ -40,7 +40,7 @@ def _buy(raw_id="order-1"):
 
 def _upload(client, document):
     return client.post(
-        "/data/import",
+        "/api/data/import",
         files={"file": ("backup.json", json.dumps(document), "application/json")},
     )
 
@@ -50,7 +50,7 @@ class TestExportEndpoint:
         repository.create(base_currency="EUR", name="Main")
         repository.add_transactions("Main", [_buy()])
 
-        response = client.get("/data/export")
+        response = client.get("/api/data/export")
 
         assert response.status_code == 200
         disposition = response.headers["content-disposition"]
@@ -65,7 +65,7 @@ class TestExportEndpoint:
         repository.create(base_currency="EUR", name="Main")
         repository.create(base_currency="USD", name="US")
 
-        response = client.get("/data/export", params={"portfolio": "US"})
+        response = client.get("/api/data/export", params={"portfolio": "US"})
 
         assert response.status_code == 200
         assert "US" in response.headers["content-disposition"]
@@ -73,7 +73,7 @@ class TestExportEndpoint:
         assert [entry["name"] for entry in document["portfolios"]] == ["US"]
 
     def test_unknown_portfolio_returns_404(self, client):
-        assert client.get("/data/export", params={"portfolio": "Nope"}).status_code == 404
+        assert client.get("/api/data/export", params={"portfolio": "Nope"}).status_code == 404
 
 
 class TestImportEndpoint:
@@ -117,7 +117,7 @@ class TestImportEndpoint:
 
     def test_non_json_file_returns_400(self, client):
         response = client.post(
-            "/data/import", files={"file": ("backup.json", "{not json", "application/json")}
+            "/api/data/import", files={"file": ("backup.json", "{not json", "application/json")}
         )
 
         assert response.status_code == 400
@@ -125,7 +125,7 @@ class TestImportEndpoint:
     def test_export_then_reimport_is_idempotent(self, client, repository):
         repository.create(base_currency="EUR", name="Main")
         repository.add_transactions("Main", [_buy()])
-        exported = json.loads(client.get("/data/export").content)
+        exported = json.loads(client.get("/api/data/export").content)
 
         response = _upload(client, exported)
 
