@@ -22,6 +22,36 @@ The app is not published to a registry; it is built locally from the `/addons` f
 4. Install it. The first build takes a few minutes.
 5. Start it, and enable **Show in sidebar**.
 
+## Updating
+
+Updates follow the same build-and-copy path as the install, with one extra step that is easy
+to miss: **bump `version:` in `config.yaml`**. Home Assistant compares that field against the
+installed version to decide whether an update exists — re-copying the folder without bumping
+it leaves the app looking unchanged, and the new code never gets built.
+
+1. Rebuild the dashboard and reassemble the bundle. `make ha-app` copies whatever is already
+   in `dist/`; it does not run the frontend build for you, so skipping the first command
+   ships a stale dashboard with fresh backend code.
+
+   ```bash
+   cd caudalnet-web && npm run build
+   cd ../pryces-api && make ha-app
+   ```
+
+2. Bump `version:` in `build/ha-app/config.yaml` (and in `homeassistant/config.yaml`, so the
+   next assembly keeps it).
+3. Copy `pryces-api/build/ha-app/` over `/addons/pryces/` on the host, replacing its contents.
+4. **Settings → Apps → App store → ⋮ → Check for updates.**
+5. Open *Pryces Portfolio*. It now offers **Update** rather than a fresh install.
+6. Update, then restart the app. The rebuild takes about as long as the first one, since the
+   Python layer is recompiled whenever `pyproject.toml` or `uv.lock` changes.
+
+Your data is not touched: portfolios live on the persistent `/data` volume, not in the image.
+Take a Home Assistant backup first if you want a rollback point anyway.
+
+If the Update button does not appear, the version bump did not reach the host — check
+`/addons/pryces/config.yaml` rather than the copy in the repo.
+
 ## Configuration
 
 | Option | Default | Purpose |
