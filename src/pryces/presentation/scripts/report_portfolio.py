@@ -50,8 +50,8 @@ def _create_script(portfolio_name: str, logger_factory: LoggerFactory) -> Report
     yahoo_settings = SettingsFactory.create_yahoo_finance_settings()
     provider = YahooFinanceProvider(settings=yahoo_settings, logger_factory=logger_factory)
     fx_provider = YahooFinanceFxProvider(provider, logger_factory)
-    historical_fx_provider = YahooFinanceHistoricalFxProvider(logger_factory)
-    historical_price_provider = YahooFinanceHistoricalPriceProvider(logger_factory)
+    historical_fx_provider = YahooFinanceHistoricalFxProvider(yahoo_settings, logger_factory)
+    historical_price_provider = YahooFinanceHistoricalPriceProvider(yahoo_settings, logger_factory)
     repository = JsonPortfolioRepository()
 
     get_portfolio = GetPortfolio(

@@ -11,8 +11,12 @@ from pryces.infrastructure.importers.horos import HorosFundsImporter
 _HEADER = "TIPO DE OPERACIÓN;PRODUCTO;VL;IMPORTE;FECHA;;"
 
 
+def _text(*lines: str) -> str:
+    return "\r\n".join(lines) + "\r\n"
+
+
 def _csv(*rows: str) -> bytes:
-    return ("\r\n".join([_HEADER, *rows]) + "\r\n").encode("utf-8")
+    return _text(_HEADER, *rows).encode("utf-8")
 
 
 @pytest.fixture
@@ -83,6 +87,56 @@ class TestParse:
     def test_raises_on_unrecognized_content(self, importer):
         with pytest.raises(UnrecognizedImportFormat):
             importer.parse(b"totally;unrelated\n1;2\n")
+
+
+class TestFormatDrift:
+    """Horos' table is hand-pasted and its shape has changed between exports:
+    cp1252 instead of UTF-8, title-case headers, and two-digit years."""
+
+    def test_reads_cp1252_encoded_file(self, importer):
+        # "ó" is 0xF3 and "€" is 0x80 in cp1252 — both invalid UTF-8. Decoding
+        # with errors="ignore" would drop them and mangle the header.
+        content = _text(
+            _HEADER, "SUSCRIPCIÓN;HOROS VALUE INTERNACIONAL, FI;218,21€;200,00€;01/06/2026;;"
+        ).encode("cp1252")
+
+        assert importer.can_parse(content) is True
+        assert importer.parse(content).transactions[0].price == Decimal("218.21")
+
+    def test_accepts_lowercase_and_title_case_headers(self, importer):
+        content = _text(
+            "Tipo de operación;Producto;VL;Importe;Fecha;",
+            "SUSCRIPCIÓN;HOROS VALUE INTERNACIONAL, FI;218,21 €;200,00 €;01/06/2026;",
+        ).encode("utf-8")
+
+        assert importer.can_parse(content) is True
+        assert len(importer.parse(content).transactions) == 1
+
+    def test_accepts_two_digit_years(self, importer):
+        content = _csv("SUSCRIPCIÓN;HOROS VALUE INTERNACIONAL, FI;222,81 €;200,00 €;04/08/26;;")
+
+        assert importer.parse(content).transactions[0].date == date(2026, 8, 4)
+
+    def test_raw_id_ignores_formatting_so_reimports_dedupe(self, importer):
+        # The same operation exported in the old and new formats must hash
+        # identically, or re-importing inserts a duplicate.
+        old = _csv("SUSCRIPCIÓN;HOROS VALUE INTERNACIONAL, FI;218,21 €;200,00 €;01/06/2026;;")
+        new = _text(
+            "Tipo de operación;Producto;VL;Importe;Fecha;",
+            "SUSCRIPCIÓN;HOROS VALUE INTERNACIONAL, FI;218,21€;200,00€;01/06/26;",
+        ).encode("cp1252")
+
+        assert importer.parse(old).transactions[0].raw_id == (
+            importer.parse(new).transactions[0].raw_id
+        )
+
+    def test_unparseable_date_is_a_row_warning_not_a_crash(self, importer):
+        content = _csv("SUSCRIPCIÓN;HOROS VALUE INTERNACIONAL, FI;218,21 €;200,00 €;2026-06-01;;")
+
+        result = importer.parse(content)
+
+        assert result.transactions == ()
+        assert "unrecognized date" in result.warnings[0].message
 
 
 def _binary_xls() -> bytes:

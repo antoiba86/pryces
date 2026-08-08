@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from fastapi import Depends
@@ -12,24 +13,38 @@ from ...application.interfaces import (
     LoggerFactory,
     PortfolioRepository,
     StockProvider,
+    SymbolMapStore,
     SymbolResolver,
 )
 from ...application.use_cases.create_portfolio import CreatePortfolio
 from ...application.use_cases.delete_portfolio import DeletePortfolio
 from ...application.use_cases.export_data import ExportData
+from ...application.use_cases.export_sample import ExportSample
 from ...application.use_cases.get_overview import GetOverview
 from ...application.use_cases.get_portfolio import GetPortfolio
 from ...application.use_cases.get_transactions import GetTransactions
 from ...application.use_cases.import_data import ImportData
 from ...application.use_cases.import_transactions import ImportTransactions
 from ...application.use_cases.list_portfolios import ListPortfolios
+from ...application.use_cases.manage_symbol_map import (
+    DeleteSymbolMapping,
+    GetSymbolMap,
+    SetSymbolMapping,
+)
 from ...application.use_cases.manage_transactions import (
     AddTransaction,
     DeleteTransaction,
     UpdateTransaction,
 )
 from ...domain.stocks import Currency, Stock
-from ...infrastructure.caching import CachedFxRateProvider, CachedStockProvider, TtlCache
+from ...infrastructure.caching import (
+    CachedFxRateProvider,
+    CachedHistoricalFxRateProvider,
+    CachedHistoricalPriceProvider,
+    CachedStockProvider,
+    HistorySeriesCache,
+    TtlCache,
+)
 from ...infrastructure.factories import SettingsFactory
 from ...infrastructure.fx import YahooFinanceFxProvider, YahooFinanceHistoricalFxProvider
 from ...infrastructure.importers.degiro import DegiroCsvImporter
@@ -41,6 +56,7 @@ from ...infrastructure.importers.trade_republic import TradeRepublicCsvImporter
 from ...infrastructure.logging import PythonLoggerFactory
 from ...infrastructure.providers import YahooFinanceHistoricalPriceProvider, YahooFinanceProvider
 from ...infrastructure.repositories import JsonPortfolioRepository
+from ...infrastructure.samples import default_sample_writers
 from ...infrastructure.resolvers import CachedSymbolResolver, JsonSymbolMap, YahooSymbolResolver
 
 # --- Infrastructure providers (overridden in tests via app.dependency_overrides) ---
@@ -60,6 +76,9 @@ def get_portfolio_repository() -> PortfolioRepository:
 # a much longer one (they barely move within an hour).
 _stock_cache: TtlCache[str, Stock] | None = None
 _fx_cache: TtlCache[tuple[Currency, Currency], Decimal] | None = None
+_historical_price_cache: TtlCache[tuple[str, date], Decimal] | None = None
+_historical_fx_cache: TtlCache[tuple[Currency, Currency, date], Decimal] | None = None
+_series_cache: HistorySeriesCache | None = None
 
 
 def _get_stock_cache() -> TtlCache[str, Stock]:
@@ -74,6 +93,37 @@ def _get_fx_cache() -> TtlCache[tuple[Currency, Currency], Decimal]:
     if _fx_cache is None:
         _fx_cache = TtlCache(SettingsFactory.create_fx_cache_settings().ttl_seconds)
     return _fx_cache
+
+
+def _get_historical_price_cache() -> TtlCache[tuple[str, date], Decimal]:
+    global _historical_price_cache
+    if _historical_price_cache is None:
+        _historical_price_cache = TtlCache(
+            SettingsFactory.create_historical_cache_settings().ttl_seconds
+        )
+    return _historical_price_cache
+
+
+def _get_historical_fx_cache() -> TtlCache[tuple[Currency, Currency, date], Decimal]:
+    global _historical_fx_cache
+    if _historical_fx_cache is None:
+        _historical_fx_cache = TtlCache(
+            SettingsFactory.create_historical_cache_settings().ttl_seconds
+        )
+    return _historical_fx_cache
+
+
+def _get_series_cache() -> HistorySeriesCache:
+    # Shared by both historical adapters: one Yahoo history call covers a whole
+    # span, and every portfolio in an overview asks for a different slice of the
+    # same one. Short-lived (the series always ends on today's unsettled close);
+    # the per-date caches above are what make later requests free.
+    global _series_cache
+    if _series_cache is None:
+        _series_cache = HistorySeriesCache(
+            TtlCache(SettingsFactory.create_cache_settings().ttl_seconds)
+        )
+    return _series_cache
 
 
 def _build_yahoo_stock_provider(
@@ -113,24 +163,70 @@ def get_fx_provider(
 def get_historical_fx_provider(
     logger_factory: LoggerFactory = Depends(get_logger_factory),
 ) -> HistoricalFxRateProvider:
-    return YahooFinanceHistoricalFxProvider(logger_factory)
+    inner = YahooFinanceHistoricalFxProvider(
+        SettingsFactory.create_yahoo_finance_settings(),
+        logger_factory,
+        series_cache=_get_series_cache(),
+    )
+    return CachedHistoricalFxRateProvider(
+        inner,
+        _get_historical_fx_cache(),
+        logger_factory,
+        unsettled_ttl_seconds=SettingsFactory.create_cache_settings().ttl_seconds,
+    )
 
 
 def get_historical_price_provider(
     logger_factory: LoggerFactory = Depends(get_logger_factory),
 ) -> HistoricalPriceProvider:
-    return YahooFinanceHistoricalPriceProvider(logger_factory)
+    inner = YahooFinanceHistoricalPriceProvider(
+        SettingsFactory.create_yahoo_finance_settings(),
+        logger_factory,
+        series_cache=_get_series_cache(),
+    )
+    return CachedHistoricalPriceProvider(
+        inner,
+        _get_historical_price_cache(),
+        logger_factory,
+        unsettled_ttl_seconds=SettingsFactory.create_cache_settings().ttl_seconds,
+    )
+
+
+def get_symbol_map_store() -> SymbolMapStore:
+    return JsonSymbolMap()
 
 
 def get_symbol_resolver(
     logger_factory: LoggerFactory = Depends(get_logger_factory),
     stock_provider: StockProvider = Depends(get_stock_provider),
+    symbol_map: SymbolMapStore = Depends(get_symbol_map_store),
 ) -> SymbolResolver:
     return CachedSymbolResolver(
         YahooSymbolResolver(logger_factory, stock_provider=stock_provider),
-        JsonSymbolMap(),
+        symbol_map,
         logger_factory,
     )
+
+
+def get_get_symbol_map(
+    symbol_map: SymbolMapStore = Depends(get_symbol_map_store),
+) -> GetSymbolMap:
+    return GetSymbolMap(symbol_map)
+
+
+def get_set_symbol_mapping(
+    symbol_map: SymbolMapStore = Depends(get_symbol_map_store),
+    stock_provider: StockProvider = Depends(get_stock_provider),
+) -> SetSymbolMapping:
+    # The stock provider is what verifies the ticker actually quotes, so a typo
+    # surfaces on save instead of on the next import.
+    return SetSymbolMapping(symbol_map, stock_provider)
+
+
+def get_delete_symbol_mapping(
+    symbol_map: SymbolMapStore = Depends(get_symbol_map_store),
+) -> DeleteSymbolMapping:
+    return DeleteSymbolMapping(symbol_map)
 
 
 def get_importer_registry(
@@ -209,6 +305,12 @@ def get_export_data(
     repository: PortfolioRepository = Depends(get_portfolio_repository),
 ) -> ExportData:
     return ExportData(repository)
+
+
+def get_export_sample(
+    repository: PortfolioRepository = Depends(get_portfolio_repository),
+) -> ExportSample:
+    return ExportSample(repository, default_sample_writers())
 
 
 def get_import_data(

@@ -67,6 +67,38 @@ class TestJsonSymbolMap:
 
         assert symbol_map.get("US0378331005") is None
 
+    def test_all_returns_every_entry(self, tmp_path):
+        symbol_map = JsonSymbolMap(tmp_path / "symbol_map.json")
+        symbol_map.put("US0378331005", "AAPL")
+        symbol_map.put("HOROS VALUE INTERNACIONAL, FI", "0P0001DFE8.F")
+
+        assert symbol_map.all() == {
+            "US0378331005": "AAPL",
+            "HOROS VALUE INTERNACIONAL, FI": "0P0001DFE8.F",
+        }
+
+    def test_all_on_a_missing_file_is_empty(self, tmp_path):
+        assert JsonSymbolMap(tmp_path / "absent.json").all() == {}
+
+    def test_delete_removes_the_entry(self, tmp_path):
+        symbol_map = JsonSymbolMap(tmp_path / "symbol_map.json")
+        symbol_map.put("US0378331005", "AAPL")
+
+        assert symbol_map.delete("us0378331005") is True
+        assert symbol_map.get("US0378331005") is None
+
+    def test_delete_reports_a_key_that_was_not_mapped(self, tmp_path):
+        symbol_map = JsonSymbolMap(tmp_path / "symbol_map.json")
+
+        assert symbol_map.delete("US0378331005") is False
+
+    def test_put_trims_the_ticker(self, tmp_path):
+        symbol_map = JsonSymbolMap(tmp_path / "symbol_map.json")
+
+        symbol_map.put("US0378331005", "  AAPL  ")
+
+        assert symbol_map.get("US0378331005") == "AAPL"
+
 
 class TestYahooSymbolResolver:
 

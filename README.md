@@ -106,6 +106,7 @@ Edit `.env` with your settings:
 | `CACHE_TTL_SECONDS` | Optional. How long (seconds) live stock quotes are cached so repeated API calls don't re-hit Yahoo Finance. Defaults to `300` (5 minutes); set `0` to disable |
 | `CACHE_CLOSED_TTL_SECONDS` | Optional. Longer cache (seconds) for quotes whose exchange is closed — the price is frozen until it reopens, so there's no point re-fetching every few minutes overnight, on weekends, or on holidays. Defaults to `3600` (1 hour) |
 | `CACHE_FX_TTL_SECONDS` | Optional. How long (seconds) FX rates are cached. They move slowly, so this defaults to `3600` (1 hour); set `0` to disable |
+| `CACHE_HISTORICAL_TTL_SECONDS` | Optional. How long (seconds) the past closes and FX rates behind XIRR/TWR are cached. A settled close never changes, so this is the longest of the caches and the main reason a second portfolio load is near-instant. Defaults to `86400` (1 day); set `0` to disable |
 
 The application loads these variables automatically from `.env` on startup via `python-dotenv`.
 
@@ -551,8 +552,13 @@ Typical flow:
    - **Horos** — Horos has no download, so paste its web "movimientos" table into a
      semicolon CSV (`TIPO DE OPERACIÓN; PRODUCTO; VL; IMPORTE; FECHA`); units are derived
      as `IMPORTE / VL`. The Horos fund auto-resolves by name on Yahoo (no mapping needed).
-   - **JSON ledger** — a `{ "base_currency", "transactions" }` file, e.g. when
-     migrating from another tool.
+   - **JSON** — either a raw `{ "base_currency", "transactions" }` ledger (e.g. when
+     migrating from another tool) or a **single-portfolio export** produced by this
+     app's own Export button. So every portfolio takes two routes in: its broker's
+     file, or a JSON of the same rows. A full multi-portfolio backup is refused here
+     — restore that from **Portfolios → Import backup** instead, since merging several
+     portfolios into one would destroy the split. Manual assets in an export are
+     ignored on this path (with a warning); only the restore screen carries them.
 
    Re-importing the same file is safe: rows are deduplicated by broker + order id,
    so the second run reports `inserted: 0`. A portfolio holds a **single broker** —

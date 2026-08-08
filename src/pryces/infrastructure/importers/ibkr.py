@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 
 from ...application.exceptions import UnrecognizedImportFormat
 from ...application.interfaces import TransactionImporter
+from ...application.text import decode_csv
 from ...domain.portfolio.transactions import (
     ImportResult,
     ImportWarning,
@@ -52,14 +53,14 @@ class IbkrActivityImporter(TransactionImporter):
         return _BROKER_ID
 
     def can_parse(self, content: bytes) -> bool:
-        text = content.decode("utf-8", errors="ignore")
+        text = decode_csv(content)
         for row in self._rows(text):
             if row[:2] == [_SECTION, "Header"]:
                 return all(token in row for token in _HEADER_SIGNATURE)
         return False
 
     def parse(self, content: bytes) -> ImportResult:
-        text = content.decode("utf-8", errors="ignore")
+        text = decode_csv(content)
         columns = self._header_columns(text)
         if columns is None:
             raise UnrecognizedImportFormat(_BROKER_ID)

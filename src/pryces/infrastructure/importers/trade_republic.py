@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 from ...application.exceptions import UnrecognizedImportFormat
 from ...application.interfaces import TransactionImporter
+from ...application.text import decode_csv
 from ...domain.portfolio.transactions import (
     ImportResult,
     ImportWarning,
@@ -53,12 +54,12 @@ class TradeRepublicCsvImporter(TransactionImporter):
         return _BROKER_ID
 
     def can_parse(self, content: bytes) -> bool:
-        text = content.decode("utf-8", errors="ignore")
+        text = decode_csv(content)
         header = text.lstrip().splitlines()[0] if text.strip() else ""
         return all(token in header for token in _HEADER_SIGNATURE)
 
     def parse(self, content: bytes) -> ImportResult:
-        text = content.decode("utf-8", errors="ignore")
+        text = decode_csv(content)
         reader = csv.DictReader(io.StringIO(text))
         if reader.fieldnames is None or not set(_HEADER_SIGNATURE).issubset(reader.fieldnames):
             raise UnrecognizedImportFormat(_BROKER_ID)

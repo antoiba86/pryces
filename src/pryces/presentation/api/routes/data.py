@@ -5,10 +5,20 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 
-from ....application.exceptions import InvalidExportDocument, PortfolioNotFound
+from ....application.exceptions import (
+    InvalidExportDocument,
+    PortfolioNotFound,
+    SampleFormatUnavailable,
+)
 from ....application.use_cases.export_data import ExportData, ExportDataRequest
+from ....application.use_cases.export_sample import ExportSample, ExportSampleRequest
 from ....application.use_cases.import_data import ImportData, ImportDataRequest
-from ..dependencies import current_user_id, get_export_data, get_import_data
+from ..dependencies import (
+    current_user_id,
+    get_export_data,
+    get_export_sample,
+    get_import_data,
+)
 from ..schemas import ImportDataResultResponse
 
 router = APIRouter(prefix="/data", tags=["data"])
@@ -32,6 +42,28 @@ def export_data(
         content=json.dumps(document, indent=2, ensure_ascii=False),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{_filename(portfolio)}"'},
+    )
+
+
+@router.get("/sample")
+def export_sample(
+    portfolio: str = Query(...),
+    sample_use_case: ExportSample = Depends(get_export_sample),
+    user_id: int = Depends(current_user_id),
+) -> Response:
+    """An anonymised, re-importable example file in the portfolio's broker format."""
+    try:
+        document = sample_use_case.handle(
+            ExportSampleRequest(portfolio_name=portfolio, user_id=user_id)
+        )
+    except PortfolioNotFound as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+    except SampleFormatUnavailable as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    return Response(
+        content=document.content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{document.filename}"'},
     )
 
 

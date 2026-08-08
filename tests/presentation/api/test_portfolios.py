@@ -31,13 +31,15 @@ class _FakeFx:
 
 
 class _FakeHistoricalFx:
-    def get_rates(self, base, quote, dates):
-        return {day: Decimal("1") for day in dates}
+    def get_rates(self, base, dates_by_quote):
+        return {
+            (quote, day): Decimal("1") for quote, days in dates_by_quote.items() for day in days
+        }
 
 
 class _FakeHistoricalPrices:
-    def get_prices(self, symbol, dates):
-        return {day: Decimal("100") for day in dates}
+    def get_prices(self, symbols, dates):
+        return {(symbol, day): Decimal("100") for symbol in symbols for day in dates}
 
 
 class _FakeResolver:

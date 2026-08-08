@@ -71,9 +71,13 @@ class ImportResultDTO:
     broker: str
     parsed: int
     inserted: int
+    # Rows dropped because their instrument never resolved to a ticker. Tracked
+    # explicitly so it stays distinct from `duplicates`, which would otherwise
+    # absorb it and report skipped rows as "already imported".
+    skipped_unresolved: int = 0
     unresolved_symbols: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
     @property
     def duplicates(self) -> int:
-        return self.parsed - self.inserted
+        return self.parsed - self.skipped_unresolved - self.inserted

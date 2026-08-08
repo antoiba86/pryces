@@ -37,8 +37,12 @@ def _create_menu(logger_factory: LoggerFactory) -> InteractiveMenu:
 
     portfolio_repository = JsonPortfolioRepository()
     fx_provider = YahooFinanceFxProvider(provider, logger_factory)
-    historical_fx_provider = YahooFinanceHistoricalFxProvider(logger_factory)
-    historical_price_provider = YahooFinanceHistoricalPriceProvider(logger_factory)
+    historical_fx_provider = YahooFinanceHistoricalFxProvider(
+        yahoo_finance_settings, logger_factory
+    )
+    historical_price_provider = YahooFinanceHistoricalPriceProvider(
+        yahoo_finance_settings, logger_factory
+    )
     symbol_resolver = CachedSymbolResolver(
         YahooSymbolResolver(logger_factory, stock_provider=provider),
         JsonSymbolMap(),

@@ -102,6 +102,7 @@ class TestYahooFinanceFxProvider:
 from datetime import date
 
 from pryces.infrastructure.fx import YahooFinanceHistoricalFxProvider
+from pryces.infrastructure.providers import YahooFinanceSettings
 
 
 class _StubLoggerFactory:
@@ -111,20 +112,29 @@ class _StubLoggerFactory:
 
 class TestYahooFinanceHistoricalFxProvider:
 
-    def _provider(self, fetcher):
-        return YahooFinanceHistoricalFxProvider(_StubLoggerFactory(), history_fetcher=fetcher)
+    def _provider(self, fetcher, max_workers=4):
+        return YahooFinanceHistoricalFxProvider(
+            YahooFinanceSettings(max_workers=max_workers, extra_delay_in_minutes=0),
+            _StubLoggerFactory(),
+            history_fetcher=fetcher,
+        )
 
     def test_same_currency_maps_to_one(self):
         provider = self._provider(lambda symbol, start: {})
 
-        rates = provider.get_rates(Currency.EUR, Currency.EUR, [date(2024, 1, 1)])
+        rates = provider.get_rates(Currency.EUR, {Currency.EUR: [date(2024, 1, 1)]})
 
-        assert rates == {date(2024, 1, 1): Decimal("1")}
+        assert rates == {(Currency.EUR, date(2024, 1, 1)): Decimal("1")}
 
     def test_empty_dates_returns_empty(self):
         provider = self._provider(lambda symbol, start: {})
 
-        assert provider.get_rates(Currency.EUR, Currency.USD, []) == {}
+        assert provider.get_rates(Currency.EUR, {Currency.USD: []}) == {}
+
+    def test_no_quotes_returns_empty(self):
+        provider = self._provider(lambda symbol, start: {})
+
+        assert provider.get_rates(Currency.EUR, {}) == {}
 
     def test_direct_pair_lookup(self):
         calls = []
@@ -134,10 +144,10 @@ class TestYahooFinanceHistoricalFxProvider:
             return {date(2024, 1, 1): Decimal("0.90")}
 
         provider = self._provider(fetch)
-        rates = provider.get_rates(Currency.EUR, Currency.USD, [date(2024, 1, 1)])
+        rates = provider.get_rates(Currency.EUR, {Currency.USD: [date(2024, 1, 1)]})
 
         assert calls == ["USDEUR=X"]
-        assert rates == {date(2024, 1, 1): Decimal("0.90")}
+        assert rates == {(Currency.USD, date(2024, 1, 1)): Decimal("0.90")}
 
     def test_falls_back_to_inverted_pair(self):
         def fetch(symbol, start):
@@ -146,9 +156,9 @@ class TestYahooFinanceHistoricalFxProvider:
             return {date(2024, 1, 1): Decimal("1.25")}  # EURUSD
 
         provider = self._provider(fetch)
-        rates = provider.get_rates(Currency.EUR, Currency.USD, [date(2024, 1, 1)])
+        rates = provider.get_rates(Currency.EUR, {Currency.USD: [date(2024, 1, 1)]})
 
-        assert rates[date(2024, 1, 1)] == Decimal("1") / Decimal("1.25")
+        assert rates[(Currency.USD, date(2024, 1, 1))] == Decimal("1") / Decimal("1.25")
 
     def test_nearest_prior_for_weekend_date(self):
         def fetch(symbol, start):
@@ -156,22 +166,68 @@ class TestYahooFinanceHistoricalFxProvider:
 
         provider = self._provider(fetch)
         # Sunday the 7th falls back to Friday the 5th.
-        rates = provider.get_rates(Currency.EUR, Currency.USD, [date(2024, 1, 7)])
+        rates = provider.get_rates(Currency.EUR, {Currency.USD: [date(2024, 1, 7)]})
 
-        assert rates[date(2024, 1, 7)] == Decimal("0.90")
+        assert rates[(Currency.USD, date(2024, 1, 7))] == Decimal("0.90")
 
     def test_date_before_series_uses_earliest(self):
         def fetch(symbol, start):
             return {date(2024, 1, 10): Decimal("0.90")}
 
         provider = self._provider(fetch)
-        rates = provider.get_rates(Currency.EUR, Currency.USD, [date(2024, 1, 1)])
+        rates = provider.get_rates(Currency.EUR, {Currency.USD: [date(2024, 1, 1)]})
 
-        assert rates[date(2024, 1, 1)] == Decimal("0.90")
+        assert rates[(Currency.USD, date(2024, 1, 1))] == Decimal("0.90")
 
     def test_unavailable_pair_yields_no_rates(self):
         provider = self._provider(lambda symbol, start: {})
 
-        rates = provider.get_rates(Currency.EUR, Currency.USD, [date(2024, 1, 1)])
+        rates = provider.get_rates(Currency.EUR, {Currency.USD: [date(2024, 1, 1)]})
 
         assert rates == {}
+
+    def test_fetches_every_quote_and_keys_by_pair(self):
+        def fetch(symbol, start):
+            return {"USDEUR=X": {date(2024, 1, 1): Decimal("0.90")}}.get(
+                symbol, {date(2024, 1, 1): Decimal("0.60")}
+            )
+
+        provider = self._provider(fetch)
+
+        rates = provider.get_rates(
+            Currency.EUR, {Currency.USD: [date(2024, 1, 1)], Currency.AUD: [date(2024, 1, 1)]}
+        )
+
+        assert rates == {
+            (Currency.USD, date(2024, 1, 1)): Decimal("0.90"),
+            (Currency.AUD, date(2024, 1, 1)): Decimal("0.60"),
+        }
+
+    def test_per_quote_dates_are_honoured(self):
+        provider = self._provider(lambda symbol, start: {date(2024, 1, 1): Decimal("0.90")})
+
+        rates = provider.get_rates(
+            Currency.EUR,
+            {Currency.USD: [date(2024, 1, 1)], Currency.AUD: [date(2024, 1, 1), date(2024, 1, 2)]},
+        )
+
+        assert set(rates) == {
+            (Currency.USD, date(2024, 1, 1)),
+            (Currency.AUD, date(2024, 1, 1)),
+            (Currency.AUD, date(2024, 1, 2)),
+        }
+
+    def test_one_failing_pair_does_not_sink_the_batch(self):
+        # Yahoo rate-limits by raising; the rest of the dashboard must still load.
+        def fetch(symbol, start):
+            if symbol.startswith("USD"):
+                raise RuntimeError("429 Too Many Requests")
+            return {date(2024, 1, 1): Decimal("0.60")}
+
+        provider = self._provider(fetch)
+
+        rates = provider.get_rates(
+            Currency.EUR, {Currency.USD: [date(2024, 1, 1)], Currency.AUD: [date(2024, 1, 1)]}
+        )
+
+        assert rates == {(Currency.AUD, date(2024, 1, 1)): Decimal("0.60")}

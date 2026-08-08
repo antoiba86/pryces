@@ -4,19 +4,28 @@ import threading
 import time
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Generic, TypeVar
 
-from ..application.interfaces import FxRateProvider, LoggerFactory, StockProvider
+from ..application.interfaces import (
+    FxRateProvider,
+    HistoricalFxRateProvider,
+    HistoricalPriceProvider,
+    LoggerFactory,
+    StockProvider,
+)
 from ..domain.stocks import Currency, MarketState, Stock
 
 # Quotes move every tick; FX is far steadier, so it gets a much longer TTL. When an
 # exchange is closed (nights, weekends, holidays) the price won't change until it
 # reopens, so closed-market quotes are held far longer to avoid pointless calls.
+# Historical closes for past dates never change at all, so they get the longest TTL
+# of the lot — a day, bounded only so a long-running process eventually re-reads.
 DEFAULT_CACHE_TTL_SECONDS = 300
 DEFAULT_FX_CACHE_TTL_SECONDS = 3600
 DEFAULT_CLOSED_CACHE_TTL_SECONDS = 3600
+DEFAULT_HISTORICAL_CACHE_TTL_SECONDS = 86400
 
 K = TypeVar("K", bound=Hashable)
 V = TypeVar("V")
@@ -154,6 +163,168 @@ class CachedStockProvider(StockProvider):
         if seconds_to_open <= 0:
             return self._closed_ttl
         return min(self._closed_ttl, seconds_to_open)
+
+
+class HistorySeriesCache:
+    """Caches whole fetched daily series, keyed by Yahoo symbol.
+
+    The per-date caches below stop a *settled* date being re-fetched, but they
+    can't stop this: one Yahoo history call returns an entire span, and two
+    callers asking for different dates of the same symbol both miss and both
+    pay for the full span again. Building an overview does exactly that — each
+    portfolio contributes its own transaction dates for the same currency pair,
+    and TWR asks again for the cashflow boundaries.
+
+    Requested starts are floored to the start of their year before both the
+    lookup and the fetch. Without that, callers whose earliest date differs by
+    days keep missing each other and re-fetching near-identical spans; with it
+    they share one entry, and pulling from January instead of March costs the
+    same single request. A cached series is still only reused when it begins no
+    later than the request, so a query reaching into an earlier year re-fetches
+    (once) and then serves everyone.
+
+    The series always runs to today and so always ends on an unsettled close —
+    hence a short TTL. Collapsing duplicates *within* a request is the point;
+    the per-date caches are what make later requests free.
+    """
+
+    def __init__(self, cache: TtlCache[str, tuple[date, dict[date, Decimal]]]) -> None:
+        self._cache = cache
+
+    def fetch(
+        self, key: str, start: date, loader: Callable[[date], dict[date, Decimal]]
+    ) -> dict[date, Decimal]:
+        floored = date(start.year, 1, 1)
+        entry = self._cache.get(key)
+        if entry is not None:
+            cached_start, series = entry
+            if cached_start <= floored:
+                return series
+        series = loader(floored)
+        if series:
+            self._cache.put(key, (floored, series))
+        return series
+
+
+class CachedHistoricalPriceProvider(HistoricalPriceProvider):
+    """Decorator serving historical close prices from a TtlCache.
+
+    Keyed per `(symbol, date)` rather than per query, so overlapping date sets
+    share entries — the same portfolio's transaction dates are re-requested
+    several times while building an overview (once per portfolio, again for the
+    unified return math, and again for TWR), and every repeat becomes a hit.
+
+    A close for a past date is final, so those entries are held for the cache's
+    long default TTL. Dates from today onwards are not settled yet, so they get
+    `unsettled_ttl_seconds` (the short quote TTL) instead. Pairs the inner
+    provider can't price are left uncached so they're retried next time.
+    """
+
+    def __init__(
+        self,
+        inner: HistoricalPriceProvider,
+        cache: TtlCache[tuple[str, date], Decimal],
+        logger_factory: LoggerFactory,
+        unsettled_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
+        today: Callable[[], date] = lambda: datetime.now(timezone.utc).date(),
+    ) -> None:
+        self._inner = inner
+        self._cache = cache
+        self._logger = logger_factory.get_logger(__name__)
+        self._unsettled_ttl = unsettled_ttl_seconds
+        self._today = today
+
+    def get_prices(self, symbols: list[str], dates: list[date]) -> dict[tuple[str, date], Decimal]:
+        if not symbols or not dates:
+            return {}
+
+        prices: dict[tuple[str, date], Decimal] = {}
+        missing_dates_by_symbol: dict[str, list[date]] = {}
+        for symbol in dict.fromkeys(symbols):
+            for day in dates:
+                cached = self._cache.get((symbol, day))
+                if cached is not None:
+                    prices[(symbol, day)] = cached
+                else:
+                    missing_dates_by_symbol.setdefault(symbol, []).append(day)
+
+        if missing_dates_by_symbol:
+            # One batch for every symbol still missing, over the union of the
+            # dates they need — the inner provider fetches a span per symbol
+            # anyway, so a narrower per-symbol date list would not save a call.
+            missing_dates = sorted(
+                {day for days in missing_dates_by_symbol.values() for day in days}
+            )
+            self._logger.debug(
+                f"Historical price cache miss for {len(missing_dates_by_symbol)}/{len(symbols)} "
+                f"symbols; fetching"
+            )
+            fetched = self._inner.get_prices(list(missing_dates_by_symbol), missing_dates)
+            for (symbol, day), price in fetched.items():
+                self._cache.put((symbol, day), price, self._ttl_for(day))
+                if day in missing_dates_by_symbol.get(symbol, ()):
+                    prices[(symbol, day)] = price
+
+        return prices
+
+    def _ttl_for(self, day: date) -> int | None:
+        # A past close never changes; today's is still moving (None = the
+        # cache's long default).
+        return None if day < self._today() else self._unsettled_ttl
+
+
+class CachedHistoricalFxRateProvider(HistoricalFxRateProvider):
+    """Decorator serving historical FX rates from a TtlCache.
+
+    The counterpart to CachedHistoricalPriceProvider, keyed per
+    `(base, quote, date)`. Same reasoning: past rates are final and held for the
+    long default TTL, today's gets the short one, and unavailable pairs stay
+    uncached so they're retried.
+    """
+
+    def __init__(
+        self,
+        inner: HistoricalFxRateProvider,
+        cache: TtlCache[tuple[Currency, Currency, date], Decimal],
+        logger_factory: LoggerFactory,
+        unsettled_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
+        today: Callable[[], date] = lambda: datetime.now(timezone.utc).date(),
+    ) -> None:
+        self._inner = inner
+        self._cache = cache
+        self._logger = logger_factory.get_logger(__name__)
+        self._unsettled_ttl = unsettled_ttl_seconds
+        self._today = today
+
+    def get_rates(
+        self, base: Currency, dates_by_quote: dict[Currency, list[date]]
+    ) -> dict[tuple[Currency, date], Decimal]:
+        if not dates_by_quote:
+            return {}
+
+        rates: dict[tuple[Currency, date], Decimal] = {}
+        missing: dict[Currency, list[date]] = {}
+        for quote, dates in dates_by_quote.items():
+            for day in dict.fromkeys(dates):
+                cached = self._cache.get((base, quote, day))
+                if cached is not None:
+                    rates[(quote, day)] = cached
+                else:
+                    missing.setdefault(quote, []).append(day)
+
+        if missing:
+            self._logger.debug(
+                f"Historical FX cache miss for {len(missing)}/{len(dates_by_quote)} quotes; fetching"
+            )
+            fetched = self._inner.get_rates(base, missing)
+            for (quote, day), rate in fetched.items():
+                self._cache.put((base, quote, day), rate, self._ttl_for(day))
+                rates[(quote, day)] = rate
+
+        return rates
+
+    def _ttl_for(self, day: date) -> int | None:
+        return None if day < self._today() else self._unsettled_ttl
 
 
 class CachedFxRateProvider(FxRateProvider):

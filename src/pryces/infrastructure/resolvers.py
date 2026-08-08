@@ -9,7 +9,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from ..application.interfaces import LoggerFactory, StockProvider, SymbolResolver
+from ..application.interfaces import LoggerFactory, StockProvider, SymbolMapStore, SymbolResolver
 from ..domain.portfolio.transactions import Instrument
 from ..domain.stocks import Currency
 from .repositories import resolve_data_dir
@@ -88,24 +88,35 @@ def _trimmed_name(name: str | None) -> str | None:
     return trimmed if trimmed and trimmed != name else None
 
 
-class JsonSymbolMap:
+class JsonSymbolMap(SymbolMapStore):
     """User-editable ISIN/symbol → Yahoo ticker cache, stored as one JSON file.
 
     Keys are uppercased (ISINs for broker imports). The file lives in the
-    Pryces data dir and is meant to be hand-corrected when a guess is wrong;
-    writes are atomic via tmp-file + os.replace.
+    Pryces data dir and is meant to be corrected when a guess is wrong — from
+    the dashboard's Symbol map screen, or by hand; writes are atomic via
+    tmp-file + os.replace.
     """
 
     def __init__(self, path: Path | None = None) -> None:
         self._path = path if path is not None else resolve_data_dir() / SYMBOL_MAP_FILENAME
+
+    def all(self) -> dict[str, str]:
+        return self._load()
 
     def get(self, key: str) -> str | None:
         return self._load().get(key.strip().upper())
 
     def put(self, key: str, ticker: str) -> None:
         mapping = self._load()
-        mapping[key.strip().upper()] = ticker
+        mapping[key.strip().upper()] = ticker.strip()
         self._write(mapping)
+
+    def delete(self, key: str) -> bool:
+        mapping = self._load()
+        if mapping.pop(key.strip().upper(), None) is None:
+            return False
+        self._write(mapping)
+        return True
 
     def _load(self) -> dict[str, str]:
         if not self._path.exists():

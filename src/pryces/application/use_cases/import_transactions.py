@@ -7,6 +7,7 @@ from ..dtos import ImportResultDTO
 from ..exceptions import PortfolioBrokerMismatch, UnrecognizedImportFormat
 from ..importers import ImporterRegistry
 from ..interfaces import PortfolioRepository, SymbolResolver
+from ..text import describe_content
 
 
 @dataclass(frozen=True)
@@ -44,9 +45,20 @@ class ImportTransactions:
             else self._registry.auto_detect(request.content)
         )
         if importer is None:
-            raise UnrecognizedImportFormat(request.broker or "auto")
+            raise UnrecognizedImportFormat(
+                request.broker or "auto", self._registry.diagnose(request.content)
+            )
 
-        result = importer.parse(request.content)
+        try:
+            result = importer.parse(request.content)
+        except UnrecognizedImportFormat as error:
+            # The importer matched on `can_parse` but choked on the body. Keep
+            # its own explanation when it has one — it knows why far better than
+            # a header preview does — and fall back to describing the file only
+            # when it raised bare.
+            raise UnrecognizedImportFormat(
+                error.broker_id, error.detail or describe_content(request.content)
+            ) from error
         mapping, unresolved = self._resolve(result.instruments, result.transactions)
         transactions = [
             replace(tx, symbol=mapping.get(tx.symbol, tx.symbol)) for tx in result.transactions
@@ -59,20 +71,36 @@ class ImportTransactions:
         existing = distinct_brokers(
             self._repository.get_transactions(request.portfolio_name, request.user_id)
         )
+        # Checked against everything parsed, not just what will be stored: a file
+        # whose instruments all fail to resolve must still be refused by a
+        # portfolio belonging to another broker.
         incoming = distinct_brokers(transactions)
         if len(existing | incoming) > 1:
             raise PortfolioBrokerMismatch(", ".join(sorted(existing)), ", ".join(sorted(incoming)))
 
+        # Rows whose instrument never resolved are skipped rather than stored
+        # under the raw product name. Such a row cannot be priced, so it is left
+        # out of positions and totals anyway — storing it just hides broken data
+        # in the ledger. Skipping loses nothing: `raw_id` comes from the file's
+        # contents, never from resolution, so re-importing the same file after
+        # adding a symbol mapping inserts exactly these rows and dedupes the rest.
+        unresolved_set = set(unresolved)
+        storable = [tx for tx in transactions if tx.symbol not in unresolved_set]
+        skipped = len(transactions) - len(storable)
+
         inserted = self._repository.add_transactions(
-            request.portfolio_name, transactions, request.user_id
+            request.portfolio_name, storable, request.user_id
         )
 
         warnings = tuple(warning.message for warning in result.warnings)
-        warnings += tuple(f"Unresolved symbol: {symbol}" for symbol in unresolved)
+        warnings += tuple(
+            f"Unresolved symbol, rows not imported: {symbol}" for symbol in unresolved
+        )
         return ImportResultDTO(
             broker=importer.broker_id,
             parsed=len(transactions),
             inserted=inserted,
+            skipped_unresolved=skipped,
             unresolved_symbols=tuple(unresolved),
             warnings=warnings,
         )

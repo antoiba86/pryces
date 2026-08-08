@@ -779,6 +779,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "xlrd" },
+    { name = "xlwt" },
     { name = "yfinance" },
 ]
 
@@ -788,7 +789,6 @@ dev = [
     { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-cov" },
-    { name = "xlwt" },
 ]
 
 [package.metadata]
@@ -802,7 +802,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
     { name = "xlrd", specifier = ">=2.0.1" },
-    { name = "xlwt", marker = "extra == 'dev'", specifier = ">=1.3.0" },
+    { name = "xlwt", specifier = ">=1.3.0" },
     { name = "yfinance", specifier = ">=1.2.0" },
 ]
 provides-extras = ["dev"]
