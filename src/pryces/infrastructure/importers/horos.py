@@ -3,11 +3,12 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from ...application.exceptions import UnrecognizedImportFormat
 from ...application.interfaces import TransactionImporter
+from ...application.text import decode_csv
 from ...domain.portfolio.transactions import (
     ImportResult,
     ImportWarning,
@@ -24,9 +25,14 @@ _BROKER_ID = "horos"
 _BROKER_LABEL = "Horos"
 
 # Header of the Horos web "movimientos" table (pasted out as a semicolon CSV —
-# Horos offers no download). Columns: type, product, NAV, amount, date.
+# Horos offers no download). Columns: type, product, NAV, amount, date. Labels
+# are upper-cased before matching: the site has emitted both "TIPO DE OPERACIÓN"
+# and "Tipo de operación", and the casing carries no meaning.
 _DELIMITER = ";"
 _HEADER_SIGNATURE = ("TIPO DE OPERACIÓN", "PRODUCTO", "VL", "IMPORTE")
+
+# Both year widths appear in the wild ("01/06/2026" and "04/08/26").
+_DATE_FORMATS = ("%d/%m/%Y", "%d/%m/%y")
 
 _BUY_PREFIX = "SUSCRIP"
 _SELL_PREFIX = "REEMBOLS"
@@ -49,8 +55,8 @@ class HorosFundsImporter(TransactionImporter):
         return _BROKER_ID
 
     def can_parse(self, content: bytes) -> bool:
-        header = self._rows(content)[0] if self._rows(content) else []
-        joined = ";".join(header)
+        rows = self._rows(content)
+        joined = ";".join(_label(cell) for cell in rows[0]) if rows else ""
         return all(token in joined for token in _HEADER_SIGNATURE)
 
     def parse(self, content: bytes) -> ImportResult:
@@ -98,8 +104,9 @@ class HorosFundsImporter(TransactionImporter):
         try:
             nav = _money(self._value(row, columns, "VL"))
             amount = _money(self._value(row, columns, "IMPORTE"))
+            when = _parse_date(self._value(row, columns, "FECHA"))
             transaction = Transaction(
-                date=datetime.strptime(self._value(row, columns, "FECHA"), "%d/%m/%Y").date(),
+                date=when,
                 type=side,
                 symbol=product,
                 currency=Currency.EUR,
@@ -107,7 +114,7 @@ class HorosFundsImporter(TransactionImporter):
                 price=nav,
                 fee=Decimal("0"),
                 broker=_BROKER_LABEL,
-                raw_id=self._synthesize_id(operation, product, row, columns),
+                raw_id=self._synthesize_id(operation, product, when, nav, amount),
             )
             normalize_transactions([transaction])
         except (
@@ -137,9 +144,8 @@ class HorosFundsImporter(TransactionImporter):
     def _rows(content: bytes) -> list[list[str]]:
         # can_parse must never raise: a binary file (e.g. an .xls being
         # auto-detected) decodes to garbage that csv.reader chokes on.
-        text = content.decode("utf-8", errors="ignore")
         try:
-            return list(csv.reader(io.StringIO(text), delimiter=_DELIMITER))
+            return list(csv.reader(io.StringIO(decode_csv(content)), delimiter=_DELIMITER))
         except csv.Error:
             return []
 
@@ -147,7 +153,7 @@ class HorosFundsImporter(TransactionImporter):
     def _header_columns(cls, rows: list[list[str]]) -> dict[str, int] | None:
         if not rows:
             return None
-        labels = [cell.strip() for cell in rows[0]]
+        labels = [_label(cell) for cell in rows[0]]
         if not all(token in labels for token in _HEADER_SIGNATURE):
             return None
         return {label: index for index, label in enumerate(labels) if label}
@@ -157,16 +163,36 @@ class HorosFundsImporter(TransactionImporter):
         index = columns[label]
         return row[index].strip() if index < len(row) else ""
 
-    @classmethod
-    def _synthesize_id(cls, operation, product, row, columns) -> str:
-        parts = [
-            product,
-            operation,
-            cls._value(row, columns, "FECHA"),
-            cls._value(row, columns, "VL"),
-            cls._value(row, columns, "IMPORTE"),
-        ]
+    @staticmethod
+    def _synthesize_id(
+        operation: str, product: str, when: date, nav: Decimal, amount: Decimal
+    ) -> str:
+        # Hash the *parsed* values, not the raw cells: Horos has changed its date
+        # and money formatting between exports, and a formatting-sensitive id
+        # would make the same operation look new and re-insert as a duplicate.
+        parts = [product, operation, when.isoformat(), _canonical(nav), _canonical(amount)]
         return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _label(cell: str) -> str:
+    # Column names are matched case-insensitively by normalizing to the upper
+    # case form the signature and the per-row lookups use.
+    return cell.strip().upper()
+
+
+def _canonical(value: Decimal) -> str:
+    # "200,00 €" and "200" must hash identically; normalize() drops trailing
+    # zeros and "f" keeps it out of exponent notation.
+    return format(value.normalize(), "f")
+
+
+def _parse_date(raw: str) -> date:
+    for date_format in _DATE_FORMATS:
+        try:
+            return datetime.strptime(raw, date_format).date()
+        except ValueError:
+            continue
+    raise ValueError(f"unrecognized date: {raw!r}")
 
 
 def _money(raw: str) -> Decimal:

@@ -60,6 +60,7 @@ If the Update button does not appear, the version bump did not reach the host �
 | `cache_ttl_seconds` | `300` | How long live quotes are cached. |
 | `cache_closed_ttl_seconds` | `3600` | Quote cache while the exchange is closed. |
 | `cache_fx_ttl_seconds` | `3600` | FX rate cache. |
+| `cache_historical_ttl_seconds` | `86400` | Cache for past closes used by XIRR/TWR. A settled close never changes, so this is what makes repeat dashboard loads instant. |
 | `log_level` | `info` | Set to `debug` when diagnosing a problem. |
 | `telegram_bot_token` | — | Optional; only for the Telegram notification scripts. |
 | `telegram_group_id` | — | Optional; as above. |
@@ -71,6 +72,25 @@ and updates, and is included in Home Assistant's own backups.
 
 You can still export a portable copy from the dashboard's backup/restore screen, which
 writes the same versioned JSON document the CLI produces.
+
+## Symbols that will not resolve
+
+On import the app looks each instrument up on Yahoo to find its ticker. Most resolve from
+the ISIN in the broker's file. Some cannot: the Spanish fund exports (Renta 4, Horos) carry
+no ISIN, and Yahoo does not index the fund names, so there is nothing to search on.
+
+An import with an unresolved instrument still succeeds, but those transactions keep the raw
+product name as their symbol. They cannot be priced, so they are left out of positions and
+totals — the import reports them under **Unresolved symbols**, and the portfolio's **All
+transactions** view lists them tagged `unpriced`.
+
+To fix one, open **Symbol map** in the sidebar and add the mapping, for example
+`R4 MULTIGESTION NUMANTIA PATR. GLOBAL` → `0P000168OI.F`. Later imports of that fund then
+resolve automatically. Rows already imported under the raw name keep it; edit or delete them
+from **All transactions**.
+
+Finding the ticker: search the fund's ISIN on Yahoo Finance. Spanish funds are usually
+listed under a Morningstar-style code such as `0P000168OI.F`.
 
 ## Exposing the figures to Home Assistant
 

@@ -510,7 +510,10 @@ class TestYahooFinanceStatisticsMapper:
 
 from datetime import date as _date
 
-from pryces.infrastructure.providers import YahooFinanceHistoricalPriceProvider
+from pryces.infrastructure.providers import (
+    YahooFinanceHistoricalPriceProvider,
+    YahooFinanceSettings,
+)
 
 
 class _StubLoggerFactory:
@@ -520,36 +523,98 @@ class _StubLoggerFactory:
 
 class TestYahooFinanceHistoricalPriceProvider:
 
-    def _provider(self, fetcher):
-        return YahooFinanceHistoricalPriceProvider(_StubLoggerFactory(), history_fetcher=fetcher)
+    def _provider(self, fetcher, max_workers=4):
+        return YahooFinanceHistoricalPriceProvider(
+            YahooFinanceSettings(max_workers=max_workers, extra_delay_in_minutes=0),
+            _StubLoggerFactory(),
+            history_fetcher=fetcher,
+        )
 
     def test_empty_dates_returns_empty(self):
         provider = self._provider(lambda symbol, start: {})
 
-        assert provider.get_prices("AAPL", []) == {}
+        assert provider.get_prices(["AAPL"], []) == {}
+
+    def test_empty_symbols_returns_empty(self):
+        provider = self._provider(lambda symbol, start: {})
+
+        assert provider.get_prices([], [_date(2024, 1, 5)]) == {}
 
     def test_returns_close_for_requested_date(self):
         provider = self._provider(lambda symbol, start: {_date(2024, 1, 5): Decimal("150")})
 
-        prices = provider.get_prices("AAPL", [_date(2024, 1, 5)])
+        prices = provider.get_prices(["AAPL"], [_date(2024, 1, 5)])
 
-        assert prices == {_date(2024, 1, 5): Decimal("150")}
+        assert prices == {("AAPL", _date(2024, 1, 5)): Decimal("150")}
 
     def test_nearest_prior_for_non_trading_day(self):
         provider = self._provider(lambda symbol, start: {_date(2024, 1, 5): Decimal("150")})
 
-        prices = provider.get_prices("AAPL", [_date(2024, 1, 7)])  # weekend
+        prices = provider.get_prices(["AAPL"], [_date(2024, 1, 7)])  # weekend
 
-        assert prices[_date(2024, 1, 7)] == Decimal("150")
+        assert prices[("AAPL", _date(2024, 1, 7))] == Decimal("150")
 
     def test_date_before_series_uses_earliest(self):
         provider = self._provider(lambda symbol, start: {_date(2024, 1, 10): Decimal("150")})
 
-        prices = provider.get_prices("AAPL", [_date(2024, 1, 1)])
+        prices = provider.get_prices(["AAPL"], [_date(2024, 1, 1)])
 
-        assert prices[_date(2024, 1, 1)] == Decimal("150")
+        assert prices[("AAPL", _date(2024, 1, 1))] == Decimal("150")
 
     def test_unavailable_symbol_yields_no_prices(self):
         provider = self._provider(lambda symbol, start: {})
 
-        assert provider.get_prices("AAPL", [_date(2024, 1, 1)]) == {}
+        assert provider.get_prices(["AAPL"], [_date(2024, 1, 1)]) == {}
+
+    def test_fetches_every_symbol_and_keys_by_pair(self):
+        series = {
+            "AAPL": {_date(2024, 1, 5): Decimal("150")},
+            "MSFT": {_date(2024, 1, 5): Decimal("400")},
+        }
+        provider = self._provider(lambda symbol, start: series[symbol])
+
+        prices = provider.get_prices(["AAPL", "MSFT"], [_date(2024, 1, 5)])
+
+        assert prices == {
+            ("AAPL", _date(2024, 1, 5)): Decimal("150"),
+            ("MSFT", _date(2024, 1, 5)): Decimal("400"),
+        }
+
+    def test_duplicate_symbols_fetched_once(self):
+        calls = []
+
+        def fetcher(symbol, start):
+            calls.append(symbol)
+            return {_date(2024, 1, 5): Decimal("150")}
+
+        provider = self._provider(fetcher)
+
+        provider.get_prices(["AAPL", "AAPL"], [_date(2024, 1, 5)])
+
+        assert calls == ["AAPL"]
+
+    def test_one_failing_symbol_does_not_sink_the_batch(self):
+        # Yahoo rate-limits by raising; the rest of the dashboard must still load.
+        def fetcher(symbol, start):
+            if symbol == "AAPL":
+                raise RuntimeError("429 Too Many Requests")
+            return {_date(2024, 1, 5): Decimal("400")}
+
+        provider = self._provider(fetcher)
+
+        prices = provider.get_prices(["AAPL", "MSFT"], [_date(2024, 1, 5)])
+
+        assert prices == {("MSFT", _date(2024, 1, 5)): Decimal("400")}
+
+    def test_fetches_from_earliest_requested_date(self):
+        starts = []
+
+        def fetcher(symbol, start):
+            starts.append(start)
+            return {_date(2024, 1, 5): Decimal("150")}
+
+        provider = self._provider(fetcher)
+
+        provider.get_prices(["AAPL"], [_date(2024, 3, 1), _date(2024, 1, 5)])
+
+        assert starts == [_date(2024, 1, 5)]

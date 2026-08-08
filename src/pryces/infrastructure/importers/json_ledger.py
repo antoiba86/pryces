@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 
 from ...application.exceptions import UnrecognizedImportFormat
 from ...application.interfaces import TransactionImporter
+from ...application.serialization import EXPORT_FORMAT, EXPORT_VERSION
 from ...domain.portfolio.transactions import (
     ImportResult,
     ImportWarning,
@@ -21,12 +22,23 @@ _BROKER_ID = "json"
 
 
 class JsonLedgerImporter(TransactionImporter):
-    """Imports the JSON ledger shape used by `JsonPortfolioRepository`.
+    """Imports pryces' own JSON, in either shape it exists in.
 
-    Recognizes a top-level object with a `transactions` array (the same shape
-    portfolio files are persisted in), giving prototype users a one-command
-    migration path. Each malformed row is skipped with a warning rather than
-    aborting the whole import.
+    1. The **raw ledger** — a top-level object with a `transactions` array, the
+       shape `JsonPortfolioRepository` persists portfolio files in.
+    2. The **export document** the dashboard's Export button writes:
+       `{format: "pryces-export", version, portfolios: [...]}`.
+
+    The second makes export and import symmetric per portfolio: every portfolio
+    accepts either its broker's own file or a JSON of the same rows. Without it
+    you could download a portfolio as JSON and have no way to load it back into
+    one, since the backup/restore screen restores whole portfolios *by name* —
+    a different operation from "add these rows to this portfolio".
+
+    A multi-portfolio export is refused rather than flattened: merging several
+    portfolios into one silently destroys the split, and restore already does
+    that job properly. Malformed rows are skipped with a warning rather than
+    aborting the import.
     """
 
     @property
@@ -34,23 +46,24 @@ class JsonLedgerImporter(TransactionImporter):
         return _BROKER_ID
 
     def can_parse(self, content: bytes) -> bool:
-        try:
-            data = json.loads(content)
-        except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
-            return False
-        return isinstance(data, dict) and isinstance(data.get("transactions"), list)
+        data = _load(content)
+        # Export documents match here even when `parse` will reject them (wrong
+        # version, several portfolios) so the user gets that specific reason
+        # instead of a generic "no importer recognised this file".
+        return _ledger_rows(data) is not None or _is_export_document(data)
 
     def parse(self, content: bytes) -> ImportResult:
-        try:
-            data = json.loads(content)
-        except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as error:
-            raise UnrecognizedImportFormat(_BROKER_ID) from error
-        if not isinstance(data, dict) or not isinstance(data.get("transactions"), list):
-            raise UnrecognizedImportFormat(_BROKER_ID)
+        data = _load(content)
+        warnings: list[ImportWarning] = []
+
+        rows = _ledger_rows(data)
+        if rows is None:
+            if not _is_export_document(data):
+                raise UnrecognizedImportFormat(_BROKER_ID)
+            rows = _export_rows(data, warnings)
 
         transactions: list[Transaction] = []
-        warnings: list[ImportWarning] = []
-        for index, row in enumerate(data["transactions"]):
+        for index, row in enumerate(rows):
             transaction = self._build_transaction(index, row, warnings)
             if transaction is not None:
                 transactions.append(transaction)
@@ -99,6 +112,68 @@ class JsonLedgerImporter(TransactionImporter):
             broker=row.get("broker"),
             raw_id=row.get("raw_id"),
         )
+
+
+def _load(content: bytes) -> object | None:
+    # can_parse must never raise, so a non-JSON upload simply yields None.
+    try:
+        return json.loads(content)
+    except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
+        return None
+
+
+def _ledger_rows(data: object) -> list | None:
+    if isinstance(data, dict) and isinstance(data.get("transactions"), list):
+        return data["transactions"]
+    return None
+
+
+def _is_export_document(data: object) -> bool:
+    return (
+        isinstance(data, dict)
+        and data.get("format") == EXPORT_FORMAT
+        and isinstance(data.get("portfolios"), list)
+    )
+
+
+def _export_rows(data: dict, warnings: list[ImportWarning]) -> list:
+    """The single portfolio entry's rows, or a refusal explaining why not."""
+    if data.get("version") != EXPORT_VERSION:
+        raise UnrecognizedImportFormat(
+            _BROKER_ID,
+            f"Unsupported export version {data.get('version')!r}; this build reads "
+            f"version {EXPORT_VERSION}.",
+        )
+
+    entries = [entry for entry in data["portfolios"] if isinstance(entry, dict)]
+    if len(entries) > 1:
+        names = ", ".join(str(entry.get("name")) for entry in entries)
+        raise UnrecognizedImportFormat(
+            _BROKER_ID,
+            f"This backup holds {len(entries)} portfolios ({names}). Importing into a "
+            "single portfolio would merge them, so it is refused — restore it from "
+            "Portfolios → Import backup, or export one portfolio and import that.",
+        )
+    if not entries:
+        return []
+
+    entry = entries[0]
+    if entry.get("manual_assets"):
+        # Transactions are all this path can carry; saying so beats leaving the
+        # user to notice the assets are missing.
+        warnings.append(
+            ImportWarning(
+                code="manual_assets_ignored",
+                level=WarningLevel.WARNING,
+                message=(
+                    f"{len(entry['manual_assets'])} manual asset(s) in the file were "
+                    "ignored: a transaction import cannot carry them. Use "
+                    "Portfolios \u2192 Import backup to restore those."
+                ),
+            )
+        )
+    rows = entry.get("transactions")
+    return rows if isinstance(rows, list) else []
 
 
 def _to_decimal(value: object) -> Decimal | None:

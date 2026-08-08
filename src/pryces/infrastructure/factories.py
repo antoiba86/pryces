@@ -4,6 +4,7 @@ from .caching import (
     DEFAULT_CACHE_TTL_SECONDS,
     DEFAULT_CLOSED_CACHE_TTL_SECONDS,
     DEFAULT_FX_CACHE_TTL_SECONDS,
+    DEFAULT_HISTORICAL_CACHE_TTL_SECONDS,
     CacheSettings,
 )
 from .exceptions import ConfigurationError
@@ -73,6 +74,16 @@ class SettingsFactory:
         return CacheSettings(
             ttl_seconds=SettingsFactory._read_ttl(
                 "CACHE_FX_TTL_SECONDS", DEFAULT_FX_CACHE_TTL_SECONDS
+            )
+        )
+
+    @staticmethod
+    def create_historical_cache_settings() -> CacheSettings:
+        # Historical closes: longest TTL (default 1 day) — a past date's close is
+        # final, so re-fetching it only costs Yahoo quota.
+        return CacheSettings(
+            ttl_seconds=SettingsFactory._read_ttl(
+                "CACHE_HISTORICAL_TTL_SECONDS", DEFAULT_HISTORICAL_CACHE_TTL_SECONDS
             )
         )
 

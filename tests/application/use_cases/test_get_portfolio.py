@@ -207,11 +207,17 @@ class _FakeHistoricalFx:
         self.rates = rates or {}
         self.calls = []
 
-    def get_rates(self, base, quote, dates):
-        self.calls.append((base, quote, tuple(dates)))
-        if quote == base:
-            return {d: Decimal("1") for d in dates}
-        return {d: self.rates.get((quote, d)) for d in dates if (quote, d) in self.rates}
+    def get_rates(self, base, dates_by_quote):
+        resolved = {}
+        for quote, dates in dates_by_quote.items():
+            self.calls.append((base, quote, tuple(dates)))
+            if quote == base:
+                resolved.update({(quote, d): Decimal("1") for d in dates})
+            else:
+                resolved.update(
+                    {(quote, d): self.rates[(quote, d)] for d in dates if (quote, d) in self.rates}
+                )
+        return resolved
 
 
 class TestGetPortfolioXirr:
@@ -288,9 +294,12 @@ class _FakeHistoricalPrices:
         # prices: dict[symbol -> dict[date -> Decimal]]
         self.prices = prices
 
-    def get_prices(self, symbol, dates):
-        series = self.prices.get(symbol, {})
-        return {d: series[d] for d in dates if d in series}
+    def get_prices(self, symbols, dates):
+        resolved = {}
+        for symbol in symbols:
+            series = self.prices.get(symbol, {})
+            resolved.update({(symbol, d): series[d] for d in dates if d in series})
+        return resolved
 
 
 class TestGetPortfolioTwr:

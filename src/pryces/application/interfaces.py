@@ -64,20 +64,77 @@ class SymbolResolver(ABC):
         pass
 
 
+class SampleWriter(ABC):
+    """Writes transactions back out in a broker's own file format.
+
+    The mirror of `TransactionImporter`, used to produce an anonymised example
+    file for a portfolio: the output must be re-importable by the importer with
+    the same `broker_id`, which is what keeps the two in step.
+    """
+
+    @property
+    @abstractmethod
+    def broker_id(self) -> str:
+        pass
+
+    @property
+    @abstractmethod
+    def extension(self) -> str:
+        # File extension without the dot, e.g. "csv" or "xls".
+        pass
+
+    @abstractmethod
+    def write(self, transactions: list[Transaction]) -> bytes:
+        pass
+
+
+class SymbolMapStore(ABC):
+    """The user-maintained ISIN/name → Yahoo ticker overrides.
+
+    Exists as a port because some instruments can never be resolved
+    automatically — Spanish fund exports carry no ISIN and Yahoo does not index
+    the fund names — so the mapping has to be editable by the user, which means
+    use cases (not just the resolver) need to read and write it.
+    """
+
+    @abstractmethod
+    def all(self) -> dict[str, str]:
+        pass
+
+    @abstractmethod
+    def get(self, key: str) -> str | None:
+        pass
+
+    @abstractmethod
+    def put(self, key: str, ticker: str) -> None:
+        pass
+
+    @abstractmethod
+    def delete(self, key: str) -> bool:
+        # True when an entry was removed, False when the key was not mapped.
+        pass
+
+
 class HistoricalFxRateProvider(ABC):
     @abstractmethod
-    def get_rates(self, base: Currency, quote: Currency, dates: list[date]) -> dict[date, Decimal]:
-        # Rate-per-quote-unit in the base currency on each requested date, using
-        # the nearest prior trading day. Quotes equal to base map every date to
-        # Decimal("1"). Dates with no available rate are omitted.
+    def get_rates(
+        self, base: Currency, dates_by_quote: dict[Currency, list[date]]
+    ) -> dict[tuple[Currency, date], Decimal]:
+        # Rate-per-quote-unit in the base currency for each (quote, date) pair,
+        # using the nearest prior trading day. Quotes equal to base map every
+        # date to Decimal("1"). Pairs with no available rate are omitted.
+        # Takes every quote at once so the adapter can fetch them concurrently;
+        # dates are per-quote because callers rarely need the same set for all.
         pass
 
 
 class HistoricalPriceProvider(ABC):
     @abstractmethod
-    def get_prices(self, symbol: str, dates: list[date]) -> dict[date, Decimal]:
-        # Close price for the symbol on each requested date, using the nearest
-        # prior trading day. Dates with no available price are omitted.
+    def get_prices(self, symbols: list[str], dates: list[date]) -> dict[tuple[str, date], Decimal]:
+        # Close price for each (symbol, date) pair, using the nearest prior
+        # trading day. Pairs with no available price are omitted. Takes every
+        # symbol at once so the adapter can fetch them concurrently; callers
+        # want the same dates for all symbols.
         pass
 
 

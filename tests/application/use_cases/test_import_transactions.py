@@ -55,6 +55,25 @@ class _StubImporter:
         return self._result
 
 
+class _FailingParseImporter:
+    """Matches on can_parse but rejects the body — a header the importer claims
+    but rows it cannot read. `detail` mimics an importer that knows exactly why."""
+
+    def __init__(self, broker_id, detail=None):
+        self._broker_id = broker_id
+        self._detail = detail
+
+    @property
+    def broker_id(self):
+        return self._broker_id
+
+    def can_parse(self, content):
+        return True
+
+    def parse(self, content):
+        raise UnrecognizedImportFormat(self._broker_id, self._detail)
+
+
 class _MapResolver:
     def __init__(self, mapping):
         self._mapping = mapping
@@ -109,7 +128,7 @@ class TestImportTransactions:
             repository,
         )
 
-        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
 
         persisted = repository.received[1]
         assert persisted[0].symbol == "IONQ"
@@ -118,26 +137,80 @@ class TestImportTransactions:
         assert dto.inserted == 1
         assert dto.unresolved_symbols == ()
 
-    def test_keeps_symbol_and_warns_when_unresolved(self):
+    def test_skips_rows_whose_instrument_did_not_resolve(self):
+        # Stored under its raw product name a row cannot be priced, so it is
+        # excluded from positions and totals anyway — keeping it would only
+        # hide broken data in the ledger.
         result = ImportResult(
             transactions=(_transaction("ES0105618005"),),
             instruments=(Instrument(symbol="ES0105618005", isin="ES0105618005"),),
         )
-        repository = _RecordingRepository(inserted=1)
+        repository = _RecordingRepository(inserted=0)
         use_case = _use_case(_StubImporter("degiro", result), _MapResolver({}), repository)
 
-        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
 
-        assert repository.received[1][0].symbol == "ES0105618005"
+        assert repository.received[1] == []
+        assert dto.parsed == 1
+        assert dto.inserted == 0
+        assert dto.skipped_unresolved == 1
         assert dto.unresolved_symbols == ("ES0105618005",)
         assert any("ES0105618005" in warning for warning in dto.warnings)
+
+    def test_resolved_rows_still_import_alongside_skipped_ones(self):
+        result = ImportResult(
+            transactions=(_transaction("ES0105618005"), _transaction("US0378331005")),
+            instruments=(
+                Instrument(symbol="ES0105618005", isin="ES0105618005"),
+                Instrument(symbol="US0378331005", isin="US0378331005"),
+            ),
+        )
+        repository = _RecordingRepository(inserted=1)
+        use_case = _use_case(
+            _StubImporter("degiro", result), _MapResolver({"US0378331005": "AAPL"}), repository
+        )
+
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
+
+        assert [tx.symbol for tx in repository.received[1]] == ["AAPL"]
+        assert dto.parsed == 2
+        assert dto.inserted == 1
+        assert dto.skipped_unresolved == 1
+
+    def test_skipped_rows_are_not_counted_as_duplicates(self):
+        # `duplicates` is derived; without subtracting the skipped rows it would
+        # report them as "already imported", which is the opposite of the truth.
+        result = ImportResult(
+            transactions=(_transaction("ES0105618005"),),
+            instruments=(Instrument(symbol="ES0105618005"),),
+        )
+        use_case = _use_case(
+            _StubImporter("degiro", result), _MapResolver({}), _RecordingRepository(inserted=0)
+        )
+
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
+
+        assert dto.duplicates == 0
+
+    def test_broker_rule_still_applies_when_every_row_is_skipped(self):
+        # The mismatch check runs on everything parsed, so a file that resolves
+        # to nothing cannot slip into a portfolio belonging to another broker.
+        result = ImportResult(
+            transactions=(_transaction("ES0105618005", broker="DEGIRO"),),
+            instruments=(Instrument(symbol="ES0105618005"),),
+        )
+        repository = _RecordingRepository(inserted=0, existing=[_transaction("A", broker="Horos")])
+        use_case = _use_case(_StubImporter("degiro", result), _MapResolver({}), repository)
+
+        with pytest.raises(PortfolioBrokerMismatch):
+            use_case.handle(ImportTransactionsRequest("main", b"csv"))
 
     def test_reports_duplicates_via_inserted_count(self):
         result = ImportResult(transactions=(_transaction("A"), _transaction("A", raw_id="r2")))
         repository = _RecordingRepository(inserted=1)
         use_case = _use_case(_StubImporter("json", result), _MapResolver({"A": "A"}), repository)
 
-        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
 
         assert dto.parsed == 2
         assert dto.inserted == 1
@@ -150,7 +223,7 @@ class TestImportTransactions:
             _StubImporter("degiro", result), _MapResolver({}), _RecordingRepository()
         )
 
-        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
 
         assert "bad row" in dto.warnings
 
@@ -160,7 +233,7 @@ class TestImportTransactions:
         resolver = _MapResolver({"AAPL": "AAPL"})
         use_case = _use_case(_StubImporter("json", result), resolver, repository)
 
-        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
 
         assert repository.received[1][0].symbol == "AAPL"
         assert dto.unresolved_symbols == ()
@@ -170,7 +243,7 @@ class TestImportTransactions:
         registry = ImporterRegistry([degiro], _StubLoggerFactory())
         use_case = ImportTransactions(registry, _MapResolver({}), _RecordingRepository())
 
-        dto = use_case.handle(ImportTransactionsRequest("main", "csv", broker="degiro"))
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv", broker="degiro"))
 
         assert dto.broker == "degiro"
 
@@ -179,7 +252,46 @@ class TestImportTransactions:
         use_case = _use_case(importer, _MapResolver({}), _RecordingRepository())
 
         with pytest.raises(UnrecognizedImportFormat):
-            use_case.handle(ImportTransactionsRequest("main", "csv"))
+            use_case.handle(ImportTransactionsRequest("main", b"csv"))
+
+    def test_detection_failure_reports_what_was_tried_and_seen(self):
+        # Without this the user only sees "not a valid auto import", which says
+        # nothing about why a previously working export stopped importing.
+        importer = _StubImporter("degiro", ImportResult(transactions=()), parseable=False)
+        use_case = _use_case(importer, _MapResolver({}), _RecordingRepository())
+        content = "Tipo de operación;Producto\r\n".encode("cp1252")
+
+        with pytest.raises(UnrecognizedImportFormat) as raised:
+            use_case.handle(ImportTransactionsRequest("main", content))
+
+        message = str(raised.value)
+        assert "Tried: degiro" in message
+        assert "Tipo de operación;Producto" in message
+
+    def test_parse_failure_after_detection_also_reports_the_content(self):
+        # can_parse matched but parse choked — the header is still the fact
+        # that explains it.
+        importer = _FailingParseImporter("horos")
+        use_case = _use_case(importer, _MapResolver({}), _RecordingRepository())
+
+        with pytest.raises(UnrecognizedImportFormat) as raised:
+            use_case.handle(ImportTransactionsRequest("main", b"Fecha;ISIN\r\n"))
+
+        assert "Fecha;ISIN" in str(raised.value)
+
+    def test_an_importer_that_explains_itself_keeps_its_own_message(self):
+        # A header preview says nothing about "this backup holds 5 portfolios";
+        # only the importer knows that, so its detail must survive.
+        reason = "This backup holds 5 portfolios. Restore it from Import backup instead."
+        use_case = _use_case(
+            _FailingParseImporter("json", reason), _MapResolver({}), _RecordingRepository()
+        )
+
+        with pytest.raises(UnrecognizedImportFormat) as raised:
+            use_case.handle(ImportTransactionsRequest("main", b'{"format": "pryces-export"}'))
+
+        assert reason in str(raised.value)
+        assert "first line" not in str(raised.value)
 
     def test_empty_portfolio_adopts_the_imported_broker(self):
         result = ImportResult(transactions=(_transaction("AAPL", broker="DEGIRO"),))
@@ -188,7 +300,7 @@ class TestImportTransactions:
             _StubImporter("degiro", result), _MapResolver({"AAPL": "AAPL"}), repository
         )
 
-        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
 
         assert dto.inserted == 1
 
@@ -201,7 +313,7 @@ class TestImportTransactions:
             _StubImporter("degiro", result), _MapResolver({"AAPL": "AAPL"}), repository
         )
 
-        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
 
         assert dto.broker == "degiro"
 
@@ -215,7 +327,7 @@ class TestImportTransactions:
             _StubImporter("degiro", result), _MapResolver({"AAPL": "AAPL"}), repository
         )
 
-        dto = use_case.handle(ImportTransactionsRequest("main", "csv"))
+        dto = use_case.handle(ImportTransactionsRequest("main", b"csv"))
 
         assert dto.inserted == 1
 
@@ -227,4 +339,4 @@ class TestImportTransactions:
         )
 
         with pytest.raises(PortfolioBrokerMismatch):
-            use_case.handle(ImportTransactionsRequest("main", "csv"))
+            use_case.handle(ImportTransactionsRequest("main", b"csv"))

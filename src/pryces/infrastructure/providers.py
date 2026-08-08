@@ -19,6 +19,7 @@ from ..application.interfaces import (
 )
 from ..domain.stock_statistics import HistoricalClose, StatisticsPeriod, StockStatistics
 from ..domain.stocks import Currency, InstrumentType, MarketState, Stock
+from .caching import HistorySeriesCache
 
 _CURRENCY_ALIASES: dict[str, Currency] = {
     "GBp": Currency.GBP,
@@ -299,30 +300,63 @@ PriceHistoryFetcher = Callable[[str, date], dict[date, Decimal]]
 class YahooFinanceHistoricalPriceProvider(HistoricalPriceProvider):
     """Date-accurate close prices from Yahoo Finance daily history.
 
-    Fetches a symbol's close series once over the requested span and resolves
+    Fetches each symbol's close series once over the requested span and resolves
     each requested date to its nearest prior trading day (weekends/holidays
     fall back to the last available close; dates before the series start use
-    the earliest). Symbols that can't be fetched yield no prices. Injects an
-    optional `history_fetcher` for testing.
+    the earliest). Symbols are fetched concurrently over a `max_workers` pool,
+    since one blocking history call per symbol dominates a portfolio's build
+    time. A symbol that can't be fetched is logged and omitted rather than
+    sinking the whole batch. Injects an optional `history_fetcher` for testing.
     """
 
     def __init__(
         self,
+        settings: YahooFinanceSettings,
         logger_factory: LoggerFactory,
         history_fetcher: PriceHistoryFetcher | None = None,
+        series_cache: HistorySeriesCache | None = None,
     ) -> None:
+        self._max_workers = settings.max_workers
         self._logger = logger_factory.get_logger(__name__)
         self._fetch = history_fetcher if history_fetcher is not None else _yahoo_price_history
+        self._series_cache = series_cache
 
-    def get_prices(self, symbol: str, dates: list[date]) -> dict[date, Decimal]:
-        if not dates:
+    def get_prices(self, symbols: list[str], dates: list[date]) -> dict[tuple[str, date], Decimal]:
+        if not symbols or not dates:
             return {}
-        series = self._fetch(symbol, min(dates))
-        if not series:
-            self._logger.warning(f"No historical prices for {symbol}")
+
+        start = min(dates)
+        unique = list(dict.fromkeys(symbols))
+        with ThreadPoolExecutor(max_workers=min(len(unique), self._max_workers)) as executor:
+            series_by_symbol = dict(
+                zip(unique, executor.map(lambda symbol: self._fetch_series(symbol, start), unique))
+            )
+
+        prices: dict[tuple[str, date], Decimal] = {}
+        for symbol, series in series_by_symbol.items():
+            if not series:
+                self._logger.warning(f"No historical prices for {symbol}")
+                continue
+            ordered = sorted(series.items())
+            for day in dates:
+                price = _nearest_prior_price(ordered, day)
+                if price is not None:
+                    prices[(symbol, day)] = price
+        return prices
+
+    def _fetch_series(self, symbol: str, start: date) -> dict[date, Decimal]:
+        def load(since: date) -> dict[date, Decimal]:
+            return self._fetch(symbol, since)
+
+        try:
+            if self._series_cache is not None:
+                return self._series_cache.fetch(symbol, start, load)
+            return load(start)
+        except Exception as e:
+            # Yahoo rate-limits aggressively; one throttled symbol must not turn
+            # a whole dashboard load into a 500.
+            self._logger.error(f"Error fetching historical prices for {symbol}: {e}")
             return {}
-        ordered = sorted(series.items())
-        return {day: price for day in dates if (price := _nearest_prior_price(ordered, day))}
 
 
 def _nearest_prior_price(ordered: list[tuple[date, Decimal]], target: date) -> Decimal | None:

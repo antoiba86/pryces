@@ -109,6 +109,30 @@ class TestCreateFxCacheSettings:
             SettingsFactory.create_fx_cache_settings()
 
 
+class TestCreateHistoricalCacheSettings:
+    def test_defaults_to_one_day_when_unset(self, monkeypatch):
+        monkeypatch.delenv("CACHE_HISTORICAL_TTL_SECONDS", raising=False)
+        assert SettingsFactory.create_historical_cache_settings().ttl_seconds == 86400
+
+    def test_reads_override(self, monkeypatch):
+        monkeypatch.setenv("CACHE_HISTORICAL_TTL_SECONDS", "120")
+        assert SettingsFactory.create_historical_cache_settings().ttl_seconds == 120
+
+    def test_zero_disables_caching(self, monkeypatch):
+        monkeypatch.setenv("CACHE_HISTORICAL_TTL_SECONDS", "0")
+        assert SettingsFactory.create_historical_cache_settings().ttl_seconds == 0
+
+    def test_non_integer_raises(self, monkeypatch):
+        monkeypatch.setenv("CACHE_HISTORICAL_TTL_SECONDS", "abc")
+        with pytest.raises(ConfigurationError):
+            SettingsFactory.create_historical_cache_settings()
+
+    def test_negative_raises(self, monkeypatch):
+        monkeypatch.setenv("CACHE_HISTORICAL_TTL_SECONDS", "-5")
+        with pytest.raises(ConfigurationError):
+            SettingsFactory.create_historical_cache_settings()
+
+
 class TestCreateTelegramSettings:
     def test_happy_path(self, monkeypatch):
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token123")

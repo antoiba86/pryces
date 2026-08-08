@@ -273,12 +273,10 @@ class GetPortfolio:
             if transaction.currency != base_currency:
                 dates_by_currency[transaction.currency].add(transaction.date)
 
-        lookup: dict[tuple[Currency, date], Decimal] = {}
-        for currency, dates in dates_by_currency.items():
-            rates = self._historical_fx.get_rates(base_currency, currency, sorted(dates))
-            for on, rate in rates.items():
-                lookup[(currency, on)] = rate
-        return lookup
+        return self._historical_fx.get_rates(
+            base_currency,
+            {currency: sorted(dates) for currency, dates in dates_by_currency.items()},
+        )
 
     def _compute_twr(
         self,
@@ -331,18 +329,10 @@ class GetPortfolio:
         self, transactions: list[Transaction], dates: list[date]
     ) -> dict[tuple[str, date], Decimal]:
         symbols = {transaction.symbol for transaction in transactions}
-        lookup: dict[tuple[str, date], Decimal] = {}
-        for symbol in symbols:
-            for on, price in self._historical_price.get_prices(symbol, dates).items():
-                lookup[(symbol, on)] = price
-        return lookup
+        return self._historical_price.get_prices(sorted(symbols), dates)
 
     def _historical_rates_by_date(
         self, transactions: list[Transaction], base_currency: Currency, dates: list[date]
     ) -> dict[tuple[Currency, date], Decimal]:
         currencies = {t.currency for t in transactions if t.currency != base_currency}
-        lookup: dict[tuple[Currency, date], Decimal] = {}
-        for currency in currencies:
-            for on, rate in self._historical_fx.get_rates(base_currency, currency, dates).items():
-                lookup[(currency, on)] = rate
-        return lookup
+        return self._historical_fx.get_rates(base_currency, {c: dates for c in currencies})

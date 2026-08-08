@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .routes import data, health, overview, portfolios
+from .routes import data, health, overview, portfolios, symbol_map
 
 API_PREFIX = "/api"
 WEB_DIR_ENV_VAR = "PRYCES_WEB_DIR"
@@ -32,7 +32,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for router in (health.router, overview.router, portfolios.router, data.router):
+    for router in (
+        health.router,
+        overview.router,
+        portfolios.router,
+        data.router,
+        symbol_map.router,
+    ):
         app.include_router(router, prefix=API_PREFIX)
 
     _mount_web(app)

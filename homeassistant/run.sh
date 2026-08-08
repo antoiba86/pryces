@@ -18,6 +18,7 @@ export MAX_FETCH_WORKERS="$(option max_fetch_workers 2)"
 export CACHE_TTL_SECONDS="$(option cache_ttl_seconds 300)"
 export CACHE_CLOSED_TTL_SECONDS="$(option cache_closed_ttl_seconds 3600)"
 export CACHE_FX_TTL_SECONDS="$(option cache_fx_ttl_seconds 3600)"
+export CACHE_HISTORICAL_TTL_SECONDS="$(option cache_historical_ttl_seconds 86400)"
 
 # Only exported when set, so the Telegram adapters stay inactive by default.
 telegram_bot_token="$(option telegram_bot_token "")"

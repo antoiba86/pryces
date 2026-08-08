@@ -1,5 +1,5 @@
 name: Pryces Portfolio
-version: "0.1.1"
+version: "0.1.2"
 slug: pryces
 description: Multi-broker portfolio and net-worth tracker — positions, P&L, dividends, XIRR/TWR
 url: https://github.com/antoiba86/pryces
@@ -19,6 +19,7 @@ options:
   cache_ttl_seconds: 300
   cache_closed_ttl_seconds: 3600
   cache_fx_ttl_seconds: 3600
+  cache_historical_ttl_seconds: 86400
   log_level: info
   telegram_bot_token: ""
   telegram_group_id: ""
@@ -27,6 +28,7 @@ schema:
   cache_ttl_seconds: int(0,)
   cache_closed_ttl_seconds: int(0,)
   cache_fx_ttl_seconds: int(0,)
+  cache_historical_ttl_seconds: int(0,)
   log_level: list(critical|error|warning|info|debug|trace)
   telegram_bot_token: str?
   telegram_group_id: str?

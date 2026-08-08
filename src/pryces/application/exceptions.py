@@ -23,9 +23,18 @@ class PortfolioAlreadyExists(Exception):
 
 
 class UnrecognizedImportFormat(Exception):
-    def __init__(self, broker_id: str) -> None:
+    """No importer could read the uploaded file.
+
+    `detail` carries what was actually observed — which importers declined and
+    what the file looks like — because brokers change their export format
+    without notice and "not a valid import" alone is undiagnosable.
+    """
+
+    def __init__(self, broker_id: str, detail: str | None = None) -> None:
         self.broker_id = broker_id
-        super().__init__(f"Content is not a valid {broker_id} import")
+        self.detail = detail
+        message = f"Content is not a valid {broker_id} import"
+        super().__init__(f"{message}. {detail}" if detail else message)
 
 
 class PortfolioBrokerMismatch(Exception):
@@ -37,6 +46,28 @@ class PortfolioBrokerMismatch(Exception):
         super().__init__(
             f"Portfolio only accepts {existing} transactions; cannot import {incoming}"
         )
+
+
+class SampleFormatUnavailable(Exception):
+    """No sample writer exists for the portfolio's broker (or it has none)."""
+
+    def __init__(self, broker: str | None, supported: list[str]) -> None:
+        self.broker = broker
+        self.supported = supported
+        if broker is None:
+            message = (
+                "Portfolio has no broker transactions, so there is no broker format to "
+                "produce a sample in. Use the portfolio export instead."
+            )
+        else:
+            message = f"No sample format for {broker}. Supported: {', '.join(supported) or 'none'}"
+        super().__init__(message)
+
+
+class SymbolMappingNotFound(Exception):
+    def __init__(self, key: str) -> None:
+        self.key = key
+        super().__init__(f"Symbol mapping not found: {key}")
 
 
 class TransactionNotFound(Exception):

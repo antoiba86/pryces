@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .interfaces import LoggerFactory, TransactionImporter
+from .text import describe_content
 
 
 class ImporterRegistry:
@@ -37,8 +38,19 @@ class ImporterRegistry:
             if matched:
                 self._logger.info(f"Auto-detected importer: {importer.broker_id}")
                 return importer
-        self._logger.warning("No importer could parse the supplied content")
+        self._logger.warning(
+            f"No importer could parse the supplied content. {self.diagnose(content)}"
+        )
         return None
+
+    def diagnose(self, content: bytes) -> str:
+        """Explains a failed detection: who was asked, and what the file looks like.
+
+        Brokers change their export format silently, so the header line is the
+        one fact that turns "unrecognized file" into an actionable report.
+        """
+        tried = ", ".join(importer.broker_id for importer in self._importers) or "none"
+        return f"Tried: {tried}. {describe_content(content)}"
 
     def get(self, broker_id: str) -> TransactionImporter | None:
         for importer in self._importers:

@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 
 from ...application.exceptions import UnrecognizedImportFormat
 from ...application.interfaces import TransactionImporter
+from ...application.text import decode_csv
 from ...domain.portfolio.transactions import (
     ImportResult,
     ImportWarning,
@@ -77,12 +78,12 @@ class DegiroCsvImporter(TransactionImporter):
         return _BROKER_ID
 
     def can_parse(self, content: bytes) -> bool:
-        text = content.decode("utf-8", errors="ignore")
+        text = decode_csv(content)
         header = text.lstrip().splitlines()[0] if text.strip() else ""
         return all(token in header for token in _HEADER_SIGNATURE)
 
     def parse(self, content: bytes) -> ImportResult:
-        text = content.decode("utf-8", errors="ignore")
+        text = decode_csv(content)
         rows = list(csv.reader(io.StringIO(text)))
         if not rows or not all(token in ",".join(rows[0]) for token in _HEADER_SIGNATURE):
             raise UnrecognizedImportFormat(_BROKER_ID)

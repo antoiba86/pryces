@@ -1,7 +1,6 @@
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -40,9 +39,15 @@ def setup_logging(settings: LoggingSettings) -> None:
         root_logger.addHandler(stream_handler)
 
     if settings.logs_directory and Path(settings.logs_directory).is_dir():
-        filename = datetime.now().strftime(f"pryces_{settings.entry_point}_%Y%m%d_%H%M%S.log")
+        # One fixed name per entry point, not a timestamped one. A timestamp in
+        # the filename means every process start opens a *new* file, so
+        # RotatingFileHandler's backup_count never applies to more than the
+        # current run and old files pile up forever — unbounded growth in a
+        # directory the user may not be able to browse. With a stable name the
+        # handler owns the whole set: pryces_api.log plus at most backup_count
+        # rolled copies, and a restart appends rather than starting fresh.
         file_handler = RotatingFileHandler(
-            Path(settings.logs_directory) / filename,
+            Path(settings.logs_directory) / f"pryces_{settings.entry_point}.log",
             maxBytes=settings.max_bytes,
             backupCount=settings.backup_count,
         )

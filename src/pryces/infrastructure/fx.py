@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from decimal import Decimal
 
@@ -11,6 +12,8 @@ from ..application.interfaces import (
     StockProvider,
 )
 from ..domain.stocks import Currency
+from .caching import HistorySeriesCache
+from .providers import YahooFinanceSettings
 
 # Fetches a daily close series for a Yahoo FX symbol from `start` to today.
 HistoryFetcher = Callable[[str, date], dict[date, Decimal]]
@@ -95,32 +98,70 @@ class YahooFinanceHistoricalFxProvider(HistoricalFxRateProvider):
 
     def __init__(
         self,
+        settings: YahooFinanceSettings,
         logger_factory: LoggerFactory,
         history_fetcher: HistoryFetcher | None = None,
+        series_cache: HistorySeriesCache | None = None,
     ) -> None:
+        self._max_workers = settings.max_workers
         self._logger = logger_factory.get_logger(__name__)
         self._fetch = history_fetcher if history_fetcher is not None else _yahoo_fx_history
+        self._series_cache = series_cache
 
-    def get_rates(self, base: Currency, quote: Currency, dates: list[date]) -> dict[date, Decimal]:
-        if quote == base:
-            return {day: Decimal("1") for day in dates}
-        if not dates:
-            return {}
+    def get_rates(
+        self, base: Currency, dates_by_quote: dict[Currency, list[date]]
+    ) -> dict[tuple[Currency, date], Decimal]:
+        rates: dict[tuple[Currency, date], Decimal] = {}
+        pending: dict[Currency, list[date]] = {}
+        for quote, dates in dates_by_quote.items():
+            if quote == base:
+                rates.update({(quote, day): Decimal("1") for day in dates})
+            elif dates:
+                pending[quote] = dates
 
-        series = self._fetch_series(base, quote, min(dates))
-        if not series:
-            self._logger.warning(f"No historical FX rates for {quote.value} -> {base.value}")
-            return {}
+        if not pending:
+            return rates
 
-        ordered = sorted(series.items())
-        return {day: rate for day in dates if (rate := _nearest_prior(ordered, day)) is not None}
+        quotes = list(pending)
+        with ThreadPoolExecutor(max_workers=min(len(quotes), self._max_workers)) as executor:
+            series_by_quote = dict(
+                zip(
+                    quotes,
+                    executor.map(
+                        lambda quote: self._fetch_series(base, quote, min(pending[quote])), quotes
+                    ),
+                )
+            )
+
+        for quote, series in series_by_quote.items():
+            if not series:
+                self._logger.warning(f"No historical FX rates for {quote.value} -> {base.value}")
+                continue
+            ordered = sorted(series.items())
+            for day in pending[quote]:
+                rate = _nearest_prior(ordered, day)
+                if rate is not None:
+                    rates[(quote, day)] = rate
+        return rates
 
     def _fetch_series(self, base: Currency, quote: Currency, start: date) -> dict[date, Decimal]:
-        direct = self._fetch(f"{quote.value}{base.value}=X", start)
-        if direct:
-            return direct
-        inverted = self._fetch(f"{base.value}{quote.value}=X", start)
-        return {day: Decimal("1") / price for day, price in inverted.items() if price > 0}
+        def load(since: date) -> dict[date, Decimal]:
+            direct = self._fetch(f"{quote.value}{base.value}=X", since)
+            if direct:
+                return direct
+            inverted = self._fetch(f"{base.value}{quote.value}=X", since)
+            return {day: Decimal("1") / price for day, price in inverted.items() if price > 0}
+
+        pair = f"{quote.value}{base.value}"
+        try:
+            if self._series_cache is not None:
+                return self._series_cache.fetch(pair, start, load)
+            return load(start)
+        except Exception as e:
+            # Yahoo rate-limits aggressively; one throttled pair must not turn a
+            # whole dashboard load into a 500.
+            self._logger.error(f"Error fetching historical FX for {quote.value}->{base.value}: {e}")
+            return {}
 
 
 def _nearest_prior(ordered: list[tuple[date, Decimal]], target: date) -> Decimal | None:

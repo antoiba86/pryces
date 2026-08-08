@@ -6,6 +6,7 @@ from decimal import Decimal
 from pydantic import BaseModel
 
 from ...application.dtos import ImportDataResultDTO, ImportResultDTO
+from ...application.use_cases.manage_symbol_map import SymbolMapEntryDTO
 from ...domain.portfolio.portfolio import (
     ClosedPosition,
     ManualAsset,
@@ -250,6 +251,7 @@ class ImportResultResponse(BaseModel):
     parsed: int
     inserted: int
     duplicates: int
+    skipped_unresolved: int
     unresolved_symbols: list[str]
     warnings: list[str]
 
@@ -260,6 +262,30 @@ class ImportResultResponse(BaseModel):
             parsed=dto.parsed,
             inserted=dto.inserted,
             duplicates=dto.duplicates,
+            skipped_unresolved=dto.skipped_unresolved,
             unresolved_symbols=list(dto.unresolved_symbols),
             warnings=list(dto.warnings),
+        )
+
+
+class SymbolMappingBody(BaseModel):
+    ticker: str
+
+
+class SymbolMappingResponse(BaseModel):
+    key: str
+    ticker: str
+    # None when no verification ran (Yahoo unavailable, or verification off).
+    verified: bool | None = None
+    name: str | None = None
+    currency: str | None = None
+
+    @classmethod
+    def from_dto(cls, dto: SymbolMapEntryDTO) -> SymbolMappingResponse:
+        return cls(
+            key=dto.key,
+            ticker=dto.ticker,
+            verified=dto.verified,
+            name=dto.name,
+            currency=dto.currency,
         )
