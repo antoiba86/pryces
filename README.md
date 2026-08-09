@@ -339,7 +339,7 @@ Available commands:
 | 9 | List Portfolios | List all portfolios with base currency and transaction count |
 | 10 | Create Portfolio | Create a new portfolio (name optional, base currency) |
 | 11 | Show Portfolio | Show a portfolio with live prices (optionally send to Telegram) |
-| 12 | Import Transactions | Import a broker export (DEGIRO CSV / Trade Republic CSV / IBKR CSV / Renta 4 .xls / Horos CSV / JSON ledger) into a portfolio |
+| 12 | Import Transactions | Import a broker export (DEGIRO CSV / Trade Republic CSV / IBKR CSV / Renta 4 funds/pensions .xls / Horos CSV / JSON) into a portfolio |
 | 13 | Delete Portfolio | Delete an existing portfolio |
 | 14 | Check Readiness | Verify env vars and Telegram connectivity |
 | 15 | Export Data | Export all portfolio data (or one portfolio) to a JSON backup file |
@@ -545,10 +545,18 @@ Typical flow:
      including fractional savings-plan executions) are imported — cash transfers,
      interest, and card payments are ignored. Instruments resolve by their ISIN.
    - **Interactive Brokers** — the Activity Statement Transaction History CSV.
-   - **Renta 4** — the "Operaciones en Fondos de Inversión" export (a binary `.xls`):
-     fund subscriptions/redemptions become buys/sells (units @ NAV). The export has no
-     ISIN, so map the fund name to its Yahoo symbol once in `data/symbol_map.json`
+   - **Renta 4 funds** — the "Operaciones en Fondos de Inversión" export (a binary `.xls`):
+     subscriptions/redemptions become buys/sells (units @ NAV). The export has no
+     ISIN, so map the fund name to its Yahoo symbol once via **Symbol map**
      (e.g. `"R4 MULTIGESTION NUMANTIA PATR. GLOBAL": "0P000168OI.F"`).
+   - **Renta 4 pension plans** — the "Operaciones en Planes de Pensiones" export, same
+     `.xls` layout with a different title; `APORTACIÓN` becomes a buy at the derived NAV.
+     It carries its own broker label (`Renta 4 Pensiones`), so a pension lands in a
+     **separate portfolio** from the funds — a pension is locked and taxed differently,
+     so blending the two would produce returns you cannot act on as a unit, and the
+     overview rolls both into net worth regardless. The plan is a distinct instrument
+     from the manager's fund of the same name and needs its own mapping
+     (e.g. `"RENTPENSIÓN XVIII F.P.(NUMANTIA PP)": "0P0001NBRZ.F"`).
    - **Horos** — Horos has no download, so paste its web "movimientos" table into a
      semicolon CSV (`TIPO DE OPERACIÓN; PRODUCTO; VL; IMPORTE; FECHA`); units are derived
      as `IMPORTE / VL`. The Horos fund auto-resolves by name on Yahoo (no mapping needed).
