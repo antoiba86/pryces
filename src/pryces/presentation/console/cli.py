@@ -12,7 +12,7 @@ from ...infrastructure.importers.degiro import DegiroCsvImporter
 from ...infrastructure.importers.ibkr import IbkrActivityImporter
 from ...infrastructure.importers.json_ledger import JsonLedgerImporter
 from ...infrastructure.importers.horos import HorosFundsImporter
-from ...infrastructure.importers.renta4 import Renta4FundsImporter
+from ...infrastructure.importers.renta4 import Renta4FundsImporter, Renta4PensionsImporter
 from ...infrastructure.importers.trade_republic import TradeRepublicCsvImporter
 from ...infrastructure.logging import PythonLoggerFactory, setup_logging
 from ...infrastructure.portfolio_formatters import TelegramPortfolioFormatter
@@ -55,6 +55,7 @@ def _create_menu(logger_factory: LoggerFactory) -> InteractiveMenu:
             JsonLedgerImporter(),
             IbkrActivityImporter(),
             Renta4FundsImporter(),
+            Renta4PensionsImporter(),
             HorosFundsImporter(),
         ],
         logger_factory,

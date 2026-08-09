@@ -20,50 +20,58 @@ from ...domain.portfolio.transactions import (
 )
 from ...domain.stocks import Currency
 
-_BROKER_ID = "renta4"
-_BROKER_LABEL = "Renta 4"
-
-# Marks the funds export (the pension export shares the same column layout, so the
-# title is what distinguishes them).
-_FUNDS_MARKER = "fondos de inversión"
 _HEADER_TOKENS = ("Fecha", "Tipo operación", "Participaciones")
 
-# Spanish operation labels → transaction side. SUSCRIPCIÓN[ NUEVA] = buy units,
-# REEMBOLSO[ TOTAL/PARCIAL] = sell units.
-_BUY_PREFIX = "SUSCRIP"
-_SELL_PREFIX = "REEMBOLS"
 
+class _Renta4Importer(TransactionImporter):
+    """Shared parsing for Renta 4's binary .xls operation exports.
 
-class Renta4FundsImporter(TransactionImporter):
-    """Imports a Renta 4 "Operaciones en Fondos de Inversión" export (a binary .xls).
+    Funds and pension plans use the *same* sheet layout — preamble rows, a header
+    row, then per-product sections where a row carrying just the product name is a
+    group header for the operations beneath it. Only the title line and the Spanish
+    operation verbs differ, so subclasses supply those and inherit everything else;
+    keeping one parser is what stops the two drifting apart.
 
-    The sheet has preamble rows, then a header row, then per-fund sections: a row
-    carrying just the fund name acts as a group header for the operation rows
-    beneath it. Each operation gives units (participaciones) and a gross amount, so
-    the NAV is `importe_bruto / participaciones`; SUSCRIPCIÓN → BUY, REEMBOLSO →
-    SELL. The export has no ISIN, so the fund name is emitted as the instrument
-    name (resolution is via the user-editable symbol map). No order id is present,
-    so a stable `raw_id` is synthesized from the row to keep re-imports deduped.
+    Each operation gives units (participaciones) and a gross amount, so the NAV is
+    `importe_bruto / participaciones`. Neither export carries an ISIN, so the
+    product name is emitted as the instrument and resolution goes through the
+    user-editable symbol map. No order id is present, so a stable `raw_id` is
+    synthesized from the row to keep re-imports deduped.
     """
+
+    # The title fragment that identifies this export. Both layouts are otherwise
+    # identical, so without it one importer would swallow the other's files.
+    _MARKER: str = ""
+    _BROKER_ID: str = ""
+    # The label stored on every transaction, and what the single-broker rule
+    # compares — so this, not `_BROKER_ID`, decides whether two exports can share
+    # a portfolio.
+    _BROKER_LABEL: str = ""
+    _BUY_PREFIXES: tuple[str, ...] = ()
+    _SELL_PREFIXES: tuple[str, ...] = ()
+    # Funds legitimately carry rows that are neither side (traspaso, comisión) and
+    # skip them quietly. Pension vocabulary is less well known here, so unknown
+    # verbs are reported rather than dropped silently.
+    _WARN_ON_UNKNOWN_OPERATION: bool = False
 
     @property
     def broker_id(self) -> str:
-        return _BROKER_ID
+        return self._BROKER_ID
 
     def can_parse(self, content: bytes) -> bool:
         sheet = self._open(content)
         if sheet is None:
             return False
-        return any(_FUNDS_MARKER in self._cell(sheet, r, c).lower() for r, c in self._cells(sheet))
+        return any(self._MARKER in self._cell(sheet, r, c).lower() for r, c in self._cells(sheet))
 
     def parse(self, content: bytes) -> ImportResult:
         sheet = self._open(content)
         if sheet is None or not self.can_parse(content):
-            raise UnrecognizedImportFormat(_BROKER_ID)
+            raise UnrecognizedImportFormat(self._BROKER_ID)
 
         columns = self._header_columns(sheet)
         if columns is None:
-            raise UnrecognizedImportFormat(_BROKER_ID)
+            raise UnrecognizedImportFormat(self._BROKER_ID)
 
         transactions: list[Transaction] = []
         instruments: dict[str, Instrument] = {}
@@ -118,7 +126,9 @@ class Renta4FundsImporter(TransactionImporter):
         operation = self._cell(sheet, row, columns["Tipo operación"]).strip().upper()
         side = self._side(operation)
         if side is None:
-            return  # not a buy/sell (e.g. traspaso/comision) — silently skip
+            if self._WARN_ON_UNKNOWN_OPERATION and operation:
+                warn(f"unrecognized operation {operation!r}")
+            return  # not a buy/sell (e.g. traspaso/comision)
 
         try:
             quantity = self._decimal(sheet, row, columns["Participaciones"])
@@ -132,7 +142,7 @@ class Renta4FundsImporter(TransactionImporter):
                 quantity=quantity,
                 price=gross / quantity,
                 fee=fee,
-                broker=_BROKER_LABEL,
+                broker=self._BROKER_LABEL,
                 raw_id=self._synthesize_id(fund, operation, sheet, row, columns),
             )
             normalize_transactions([transaction])
@@ -149,11 +159,11 @@ class Renta4FundsImporter(TransactionImporter):
         transactions.append(transaction)
         instruments.setdefault(fund, Instrument(symbol=fund, name=fund, currency=Currency.EUR))
 
-    @staticmethod
-    def _side(operation: str) -> TransactionType | None:
-        if operation.startswith(_BUY_PREFIX):
+    @classmethod
+    def _side(cls, operation: str) -> TransactionType | None:
+        if operation.startswith(cls._BUY_PREFIXES):
             return TransactionType.BUY
-        if operation.startswith(_SELL_PREFIX):
+        if operation.startswith(cls._SELL_PREFIXES):
             return TransactionType.SELL
         return None
 
@@ -211,3 +221,41 @@ class Renta4FundsImporter(TransactionImporter):
             cls._cell(sheet, row, columns["Importe bruto"]),
         ]
         return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+class Renta4FundsImporter(_Renta4Importer):
+    """ "Operaciones en Fondos de Inversión" — SUSCRIPCIÓN[ NUEVA] buys units,
+    REEMBOLSO[ TOTAL/PARCIAL] sells them."""
+
+    _MARKER = "fondos de inversión"
+    _BROKER_ID = "renta4"
+    _BROKER_LABEL = "Renta 4"
+    _BUY_PREFIXES = ("SUSCRIP",)
+    _SELL_PREFIXES = ("REEMBOLS",)
+
+
+class Renta4PensionsImporter(_Renta4Importer):
+    """ "Operaciones en Planes de Pensiones" — APORTACIÓN[ NUEVA] buys units.
+
+    Deliberately carries its **own** broker label, which the single-broker rule
+    turns into a separate portfolio from the funds export. A pension is locked
+    until retirement and taxed differently, so blending it with a liquid fund
+    would produce portfolio-level XIRR/TWR figures describing a pot that cannot
+    be acted on as a unit. Nothing is lost at the top: the overview rolls every
+    portfolio into one net-worth view regardless.
+
+    The plan is also a separate *instrument* from the manager's fund of the same
+    name — different vehicle, different NAV (15.47 against 28.97 for Numantia) —
+    and keys off its own product name, so the symbol map maps the two
+    independently.
+
+    Payout verbs are a best guess: no export with one has been seen, so anything
+    unrecognized is reported rather than dropped.
+    """
+
+    _MARKER = "planes de pensiones"
+    _BROKER_ID = "renta4_pensions"
+    _BROKER_LABEL = "Renta 4 Pensiones"
+    _BUY_PREFIXES = ("APORTACI",)
+    _SELL_PREFIXES = ("PRESTACI", "RESCATE", "DISPOSICI")
+    _WARN_ON_UNKNOWN_OPERATION = True
